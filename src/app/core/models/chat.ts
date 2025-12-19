@@ -8,8 +8,8 @@ export interface ChatMessage {
 }
 
 export interface ChatCategoryOption {
-  id: string;        // стабильный id подкатегории
-  title: string;     // надпись на кнопке
+  id: string;
+  title: string;
 }
 
 export interface ChatState {

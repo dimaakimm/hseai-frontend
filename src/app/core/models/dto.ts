@@ -1,6 +1,9 @@
 export interface ClassifierRequest {
   inputs: Array<{
-    name: 'question'; datatype: 'str'; data: string; shape: 0;
+    name: 'question';
+    datatype: 'str';
+    data: string;
+    shape: 0;
   }>;
   output_fields: Array<
     | { name: 'question'; datatype: 'str' }
@@ -20,14 +23,16 @@ export interface ClassifierResponse {
 export interface AiRequestInput {
   name: 'question' | 'question_filters' | 'user_filters' | 'campus_filters' | 'chat_history';
   datatype: 'str';
-  data: string; // списки — сериализованные строки
+  data: string;
   shape: 0;
 }
 
-export interface AiRequest { inputs: AiRequestInput[]; }
+export interface AiRequest {
+  inputs: AiRequestInput[];
+}
 
 export interface AiResponse {
   outputs: {
-    answer: string; // предполагаемое поле от модели — адаптируйте под фактический контракт
+    answer: string;
   };
 }

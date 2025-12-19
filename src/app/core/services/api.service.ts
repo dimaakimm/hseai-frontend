@@ -10,10 +10,7 @@ export class ApiService {
   post<T>(endpoint: string, body: unknown, options?: object) {
     const url = this.cfg.baseUrl + endpoint;
     return this.http.post<T>(url, body, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: this.cfg.authToken,
-      },
+      headers: { 'Content-Type': 'application/json' },
       ...options,
     });
   }

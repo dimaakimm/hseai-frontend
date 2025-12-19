@@ -1,1 +1,19 @@
-<router-outlet />
+<main class="app-shell">
+  <section class="app-shell__content">
+    <h1 class="app-shell__title">HSE Study Help</h1>
+    <p class="app-shell__subtitle">
+      Задавай вопросы по учебным процессам Вышки —
+      бот поможет с категориями, разделами и ответами от ИИ-модели.
+    </p>
+    <p class="app-shell__note">
+      В правом нижнем углу есть кнопка чата. Нажми «Задать вопрос», чтобы начать диалог.
+    </p>
+  </section>
+
+  <!-- ✅ Наш popup-чат, которому мы передаём userProfile -->
+  <app-chat-popup
+    [userProfile]="userProfile"
+    [feedbackUrl]="feedbackUrl"
+    (userProfileChange)="onUserProfileChange($event)"
+  ></app-chat-popup>
+</main>

@@ -18,3 +18,8 @@ button { cursor: pointer;}
   font-style: normal;
   font-display: swap;
 }
+
+a{
+  color: #2563eb;
+  word-break: break-all;
+}

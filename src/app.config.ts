@@ -1,12 +1,16 @@
-import { ApplicationConfig, importProvidersFrom } from '@angular/core';
+import { ApplicationConfig } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { routes } from './app/app.routes';
-import { API_CONFIG } from './app/core/tokens/api-config.token';
 import { environment } from './environments/environment';
+import { ClassifierService } from './app/core/services/classifier.service';
+import { AiService } from './app/core/services/ai.service';
+import { MockClassifierService } from './app/core/services/mock/mock-classifier.service';
+import { MockAiService } from './app/core/services/mock/mock-ai.service';
 import { authInterceptor } from './app/core/interceptors/auth.interceptor';
 import { errorInterceptor } from './app/core/interceptors/error.interceptor';
 import { timeoutInterceptor } from './app/core/interceptors/timeout.interceptor';
+import { API_CONFIG } from './app/core/tokens/api-config.token';
 import { retryInterceptor } from './app/core/interceptors/retry.interceptor';
 
 export const appConfig: ApplicationConfig = {

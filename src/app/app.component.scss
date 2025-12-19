@@ -1,0 +1,30 @@
+.app-shell {
+  min-height: 100vh;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #0f172a;
+}
+
+.app-shell__content {
+  max-width: 720px;
+}
+
+.app-shell__title {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.app-shell__subtitle {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #334155;
+}
+
+.app-shell__note {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}

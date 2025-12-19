@@ -1,7 +1,338 @@
-<button class="fab" (click)="toggle()" aria-label="Открыть чат">💬</button>
+<div class="chat-widget">
+  <!-- Кнопка открытия чата -->
+  @if (!isOpen) {
+    <button
+      type="button"
+      class="chat-widget__toggle"
+      (click)="toggleOpen()"
+      aria-label="Открыть чат-помощник Вышки"
+    >
+      <span class="chat-widget__toggle-icon">💬</span>
+      <span class="chat-widget__toggle-label">Задать вопрос</span>
+    </button>
+  }
 
-@if (open) {
-  <div class="popup">
-    <app-chat-window (close)="toggle()"></app-chat-window>
-  </div>
-}
+  @if (isOpen) {
+    <section class="chat-popup" aria-label="Чат-помощник ВШЭ">
+      <!-- Шапка с кнопками -->
+      @if (viewMode === 'chat') {
+        <header class="chat-popup__header">
+          <div class="chat-popup__title-block">
+            <div>
+              <h2 class="chat-popup__title">Помощник по учебным вопросам</h2>
+              <p class="chat-popup__subtitle">
+                Я бот, созданный для помощи по учебным процессам Вышки
+              </p>
+            </div>
+          </div>
+
+          <div class="chat-popup__header-actions">
+            <button
+              type="button"
+              class="chat-popup__link"
+              (click)="onFeedbackClick()"
+            >
+              Обратная связь
+            </button>
+            <button
+              type="button"
+              class="chat-popup__link"
+              (click)="openProfileView()"
+            >
+              Изменить параметры пользователя
+            </button>
+            <button
+              type="button"
+              class="chat-popup__close"
+              (click)="close()"
+              aria-label="Закрыть чат"
+            >
+              ✕
+            </button>
+          </div>
+        </header>
+      }
+
+      <!-- Тело попапа: чат / профиль -->
+      <main class="chat-popup__body">
+        <!-- Режим: чат -->
+        @if (viewMode === 'chat') {
+          <div #messagesContainer class="chat-popup__messages">
+            @for (message of messages; track message.id; let i = $index) {
+              <article
+                class="chat-message"
+                [class.chat-message--bot]="message.role === 'bot'"
+                [class.chat-message--user]="message.role === 'user'"
+              >
+                <!-- Аватар только для сообщений бота -->
+                @if (message.role === 'bot') {
+                  @if (i === 0 || messages[i - 1].role !== 'bot') {
+                    <!-- Первое сообщение в последовательности бота — нормальный аватар -->
+                    <div class="chat-message__avatar">
+            <span class="chat-message__avatar-icon">
+              <img src="/bot-icon.png" alt="HSE" />
+            </span>
+                    </div>
+                  } @else {
+                    <!-- Последующие сообщения бота — невидимый аватар-заглушка -->
+                    <div class="chat-message__avatar chat-message__avatar--spacer"></div>
+                  }
+                }
+
+                <div class="chat-message__content">
+                  <!-- Метаданные:
+                       - всегда для пользователя
+                       - только для первого сообщения бота в последовательности -->
+                  @if (
+                    message.role === 'user' ||
+                    (message.role === 'bot' && (i === 0 || messages[i - 1].role !== 'bot'))
+                    ) {
+                    <header class="chat-message__meta">
+            <span class="chat-message__author">
+              @if (message.role === 'bot') { Бот } @else { Ты }
+            </span>
+                      @if (message.timestamp) {
+                        <span class="chat-message__time">
+                {{ message.timestamp }}
+              </span>
+                      }
+                    </header>
+                  }
+
+                  <p class="chat-message__bubble" [innerHTML]="message.text"></p>
+                </div>
+              </article>
+            }
+
+            @if (isWaitingForModel) {
+              <div class="chat-popup__status">
+                <span class="chat-popup__spinner"></span>
+                <span>ИИ-модель обрабатывает запрос…</span>
+              </div>
+            }
+          </div>
+
+
+
+          <!-- Панель выбора категории, когда confidence = 0 -->
+          @if (stage === 'chooseCategory') {
+            <section class="chat-popup__panel">
+              <p class="chat-popup__panel-title">
+                Я не смог автоматически определить категорию твоего вопроса.
+                Пожалуйста, выбери подходящую категорию:
+              </p>
+              <div class="chat-popup__buttons-row">
+                @for (category of manualCategories; track category) {
+                  <button
+                    type="button"
+                    class="chip-button"
+                    (click)="onCategorySelect(category)"
+                  >
+                    {{ category }}
+                  </button>
+                }
+              </div>
+            </section>
+          }
+
+
+
+          <!-- Панель "Удовлетворен ли ответом?" (п.5) -->
+          @if (stage === 'rateAnswer') {
+            <section class="chat-popup__panel">
+              <p class="chat-popup__panel-title">
+                Удовлетворен(а) ли ты полученным ответом?
+              </p>
+              <div class="chat-popup__buttons-row">
+                <button
+                  type="button"
+                  class="primary-button"
+                  (click)="onRate(true)"
+                >
+                  Да, удовлетворен
+                </button>
+                <button
+                  type="button"
+                  class="secondary-button"
+                  (click)="onRate(false)"
+                >
+                  Нет, не удовлетворен
+                </button>
+              </div>
+            </section>
+          }
+
+          <!-- Панель после "Нет" (п.7) -->
+          @if (stage === 'afterNegative') {
+            <section class="chat-popup__panel">
+              <p class="chat-popup__panel-title">Как продолжим?</p>
+              <div class="chat-popup__buttons-row">
+                <button
+                  type="button"
+                  class="primary-button"
+                  (click)="onClarifyCurrent()"
+                >
+                  Уточнить текущий вопрос
+                </button>
+                <button
+                  type="button"
+                  class="secondary-button"
+                  (click)="onAskNew()"
+                >
+                  Задать новый вопрос
+                </button>
+              </div>
+            </section>
+          }
+        }
+
+        <!-- Режим: профиль пользователя -->
+        @if (viewMode === 'profile') {
+          <section class="chat-popup__profile">
+            <h3 class="chat-popup__profile-title">Параметры пользователя</h3>
+            <p class="chat-popup__profile-desc">
+              Эти данные помогут боту давать более точные ответы.
+            </p>
+
+            @if (userProfileDraft) {
+              <form
+                class="profile-form"
+                (ngSubmit)="onSaveProfile()"
+                autocomplete="off"
+              >
+                <div class="profile-form__row">
+                  <label class="profile-form__label" for="profile-name">
+                    Имя (необязательно)
+                  </label>
+                  <input
+                    id="profile-name"
+                    class="profile-form__control"
+                    type="text"
+                    name="profileName"
+                    [(ngModel)]="userProfileDraft.name"
+                    (ngModelChange)="onNameChange($event)"
+                    placeholder="Как к тебе обращаться?"
+                  />
+
+                  @if (nameError) {
+                    <p class="profile-form__error">
+                      {{ nameError }}
+                    </p>
+                  }
+                </div>
+
+
+                <div class="profile-form__row">
+                  <label class="profile-form__label" for="profile-level">
+                    Уровень образования
+                  </label>
+                  <select
+                    id="profile-level"
+                    class="profile-form__control"
+                    name="profileLevel"
+                    [(ngModel)]="userProfileDraft.level"
+                  >
+                    <option value="" disabled>Выбери уровень</option>
+                    <option value="бакалавриат">Бакалавриат</option>
+                    <option value="магистратура">Магистратура</option>
+                    <option value="аспирантура">Аспирантура</option>
+                    <option value="школа/лицей">Школа / лицей</option>
+                    <option value="другое">Другое</option>
+                  </select>
+                </div>
+
+                <div class="profile-form__row">
+                  <label class="profile-form__label" for="profile-campus">
+                    Кампус
+                  </label>
+                  <select
+                    id="profile-campus"
+                    class="profile-form__control"
+                    name="profileCampus"
+                    [(ngModel)]="userProfileDraft.campus"
+                  >
+                    <option value="" disabled>Выбери кампус</option>
+                    <option value="Москва">Москва</option>
+                    <option value="Санкт-Петербург">Санкт-Петербург</option>
+                    <option value="Нижний Новгород">Нижний Новгород</option>
+                    <option value="Пермь">Пермь</option>
+                    <option value="Онлайн">Онлайн</option>
+                    <option value="другое">Другое</option>
+                  </select>
+                </div>
+
+                <div class="profile-form__actions">
+                  <button
+                    type="button"
+                    class="secondary-button"
+                    (click)="onCancelProfileEdit()"
+                  >
+                    Вернуться к чату
+                  </button>
+                  <button
+                    type="submit"
+                    class="primary-button"
+                    [disabled]="isProfileSaveDisabled"
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </form>
+            }
+          </section>
+        }
+      </main>
+
+      <!-- Футер -->
+      <footer class="chat-popup__footer">
+        @if (viewMode === 'chat') {
+          <form class="chat-input" (ngSubmit)="onSubmit()" autocomplete="off">
+      <textarea
+        class="chat-input__field"
+        name="question"
+        [(ngModel)]="currentInput"
+        [placeholder]="inputPlaceholder"
+        [disabled]="isInputDisabled"
+        rows="1"
+        (keydown)="onInputKeydown($event)"
+            ></textarea>
+            <button
+              type="submit"
+              class="chat-input__send"
+              [disabled]="isInputDisabled || !currentInput.trim()"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <g>
+                  <path fill="none" d="M0 0h24v24H0z" />
+                  <path
+                    fill="currentColor"
+                    d="M1.946 9.315c-.522-.174-.527-.455.01-.634l19.087-6.362c.529-.176.832.12.684.638l-5.454 19.086c-.15.529-.455.547-.679.045L12 14l6-8-8 6-8.054-2.685z"
+                  />
+                </g>
+              </svg>
+            </button>
+          </form>
+
+          @if (stage === 'askQuestion') {
+            <p class="chat-popup__hint">
+              Сначала сформулируй вопрос — бот автоматически определит категорию и подберёт нужный раздел.
+            </p>
+          }
+
+          @if (stage === 'clarifyQuestion') {
+            <p class="chat-popup__hint">
+              Напиши, что именно нужно уточнить в текущем ответе.
+            </p>
+          }
+        }
+
+        @if (viewMode === 'profile') {
+          <p class="chat-popup__hint">
+            После изменения параметров задай новый вопрос или уточни текущий — бот учтёт обновлённые данные.
+          </p>
+        }
+      </footer>
+
+    </section>
+  }
+</div>

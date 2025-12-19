@@ -1,0 +1,71 @@
+<div class="user-profile-form">
+  <h2>Профиль абитуриента</h2>
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()">
+    <!-- Имя -->
+    <div class="form-field">
+      <label for="name">Имя</label>
+      <input id="name" type="text" formControlName="name" />
+
+      @if (nameControl?.touched && nameControl?.invalid) {
+        <div class="error">
+          @if (nameControl?.hasError('required')) {
+            <span>Укажите ваше имя.</span>
+          }
+          @if (nameControl?.hasError('minlength')) {
+            <span>Имя должно быть не короче 3 символов.</span>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Кампус -->
+    <div class="form-field">
+      <label for="campus">Кампус</label>
+      <select id="campus" formControlName="campus">
+        @for (c of campuses; track c) {
+          <option [value]="c">
+            {{ c }}
+          </option>
+        }
+      </select>
+
+      @if (campusControl?.touched && campusControl?.invalid) {
+        <div class="error">
+          <span>Выберите кампус.</span>
+        </div>
+      }
+    </div>
+
+    <!-- Уровень образования -->
+    <div class="form-field">
+      <label for="level">Уровень образования</label>
+      <select id="level" formControlName="level">
+        <option value="" disabled>Выберите уровень</option>
+
+        @for (l of levels; track l) {
+          <option [value]="l">
+            {{ l }}
+          </option>
+        }
+      </select>
+
+      @if (levelControl?.touched && levelControl?.invalid) {
+        <div class="error">
+          <span>Выберите уровень образования.</span>
+        </div>
+      }
+    </div>
+
+    <!-- Ошибка формы -->
+    @if (submitError) {
+      <div class="error">
+        {{ submitError }}
+      </div>
+    }
+
+    <button type="submit" [disabled]="form.invalid">
+      Сохранить
+    </button>
+  </form>
+</div>
