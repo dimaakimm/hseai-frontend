@@ -1,5 +1,16 @@
-<div class="page">
-  <p class="title">HSE Study Help</p>
-  <p>Я бот, созданный  для помощи и информирования студентов, преподавателей и сотрудников Вышки!<br/>Всегда рад помочь)</p>
-</div>
-
+@if (state$ | async; as s) {
+  @switch (s.status) {
+    @case ('loading') { <div>Проверяю авторизацию...</div> }
+    @case ('unauthorized') {
+      <div>Вы не авторизованы</div>
+      <button type="button" (click)="login()">Авторизоваться</button>
+    }
+    @case ('authorized') {
+      <div>Вы авторизованы как {{ formatName(s) }}, {{ formatEmail(s) }}</div>
+      <button type="button" (click)="changeAccount()">Сменить аккаунт</button>
+    }
+    @default {
+      <div>{{ s.status === 'error' ? s.message : 'Неизвестное состояние' }}</div>
+    }
+  }
+}

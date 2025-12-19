@@ -1,12 +1,40 @@
-import { Component, ChangeDetectionStrategy } from '@angular/core';
-import { ChatPopupComponent } from '../../features/chat/chat-popup/chat-popup.component';
+import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Observable } from 'rxjs';
+import { AuthState } from '../../shared/auth/auth.models';
+import { AuthService } from '../../shared/auth/auth.service';
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [ChatPopupComponent],
+  imports: [CommonModule],
   templateUrl: './home.component.html',
-  styleUrls: ['./home.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class HomeComponent {}
+export class HomeComponent {
+  state$: Observable<AuthState>;
+
+  constructor(private auth: AuthService) {
+    this.state$ = this.auth.authState$();
+  }
+
+  login() {
+    this.auth.login();
+  }
+
+  changeAccount() {
+    this.auth.changeAccount();
+  }
+
+  // "Ким Дмитрий"
+  formatName(state: AuthState): string {
+    if (state.status !== 'authorized') return '';
+    const u = state.me.user;
+    return `${u.family_name ?? ''} ${u.given_name ?? ''}`.trim();
+  }
+
+  formatEmail(state: AuthState): string {
+    if (state.status !== 'authorized') return '';
+    const u = state.me.user;
+    return u.email || u.preferred_username || '';
+  }
+}

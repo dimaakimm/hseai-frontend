@@ -1,20 +1,65 @@
 <main class="app-shell">
   <section class="app-shell__content">
     <h1 class="app-shell__title">HSE Study Help</h1>
+
     <p class="app-shell__subtitle">
       Задавай вопросы по учебным процессам Вышки —
       бот поможет с категориями, разделами и ответами от ИИ-модели.
     </p>
+
     <p class="app-shell__note">
       В правом нижнем углу есть кнопка чата. Нажми «Задать вопрос», чтобы начать диалог.
     </p>
-    <a href="https://api.hse-ai.ru/auth/login">wwww</a>
+
+    @if (state$ | async; as s) {
+      @switch (s.status) {
+        @case ('loading') {
+          <p class="app-shell__note">Проверяю авторизацию...</p>
+        }
+
+        @case ('unauthorized') {
+          <p class="app-shell__subtitle" style="margin-top: 16px;">
+            Вы не авторизованы
+          </p>
+
+          <button type="button" (click)="login()">
+            Авторизоваться
+          </button>
+        }
+
+        @case ('authorized') {
+          <p class="app-shell__subtitle" style="margin-top: 16px;">
+            Вы авторизованы как {{ formatName(s) }}, {{ formatEmail(s) }}
+          </p>
+
+          <button type="button" (click)="changeAccount()">
+            Сменить аккаунт
+          </button>
+        }
+
+        @case ('error') {
+          <p class="app-shell__subtitle" style="margin-top: 16px;">
+            {{ s.message }}
+          </p>
+
+          <button type="button" (click)="login()">
+            Авторизоваться
+          </button>
+        }
+
+        @default { }
+      }
+    }
   </section>
 
-  <!-- ✅ Наш popup-чат, которому мы передаём userProfile -->
-  <app-chat-popup
-    [userProfile]="userProfile"
-    [feedbackUrl]="feedbackUrl"
-    (userProfileChange)="onUserProfileChange($event)"
-  ></app-chat-popup>
+  <!-- Показываем чат ТОЛЬКО если авторизован -->
+  @if (state$ | async; as s) {
+    @if (s.status === 'authorized') {
+      <app-chat-popup
+        [userProfile]="userProfile"
+        [feedbackUrl]="feedbackUrl"
+        (userProfileChange)="onUserProfileChange($event)"
+      ></app-chat-popup>
+    }
+  }
 </main>

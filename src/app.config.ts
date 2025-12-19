@@ -1,4 +1,4 @@
-import { ApplicationConfig } from '@angular/core';
+import { APP_INITIALIZER, ApplicationConfig } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { routes } from './app/app.routes';
@@ -12,6 +12,12 @@ import { errorInterceptor } from './app/core/interceptors/error.interceptor';
 import { timeoutInterceptor } from './app/core/interceptors/timeout.interceptor';
 import { API_CONFIG } from './app/core/tokens/api-config.token';
 import { retryInterceptor } from './app/core/interceptors/retry.interceptor';
+import { AuthService } from './app/shared/auth/auth.service';
+import { firstValueFrom } from 'rxjs';
+
+function initAuth(auth: AuthService) {
+  return () => firstValueFrom(auth.initAuthCheck());
+}
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -30,6 +36,12 @@ export const appConfig: ApplicationConfig = {
         maxRetries: environment.request.maxRetries,
         baseRetryDelayMs: environment.request.baseRetryDelayMs,
       },
+    },
+    {
+      provide: APP_INITIALIZER,
+      multi: true,
+      deps: [AuthService],
+      useFactory: initAuth,
     },
   ],
 };
