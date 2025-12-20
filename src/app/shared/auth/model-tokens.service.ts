@@ -24,36 +24,45 @@ export interface MeWithModelTokensResponse {
 export class ModelTokensService {
   private readonly tokens$ = new BehaviorSubject<ModelTokensResponse | null>(null);
 
-  /**
-   * Устанавливаем токены из ответа /api/me
-   */
   setFromMeResponse(me: MeWithModelTokensResponse | null | undefined): void {
     const t = me?.model_tokens ?? null;
 
-    if (!t?.access_token) {
+    if (!t || typeof t.access_token !== 'string' || t.access_token.trim().length === 0) {
+      console.warn('[ModelTokensService] model_tokens отсутствует или access_token пустой', t);
       this.tokens$.next(null);
       return;
     }
 
-    // expires_at иногда float — нормализуем
+    const expiresAtSec = Math.floor(Number(t.expires_at));
+    if (!Number.isFinite(expiresAtSec) || expiresAtSec <= 0) {
+      console.warn('[ModelTokensService] expires_at некорректный, сохраняю как есть', t.expires_at);
+    }
+
     const normalized: ModelTokensResponse = {
       ...t,
-      expires_at: Math.floor(Number(t.expires_at)),
+      expires_at: Number.isFinite(expiresAtSec) ? expiresAtSec : t.expires_at,
+      access_token: t.access_token.trim(),
     };
 
     this.tokens$.next(normalized);
+
+    // 🔍 диагностический лог (убери потом)
+    console.log('[ModelTokensService] token set, exp=', normalized.expires_at);
   }
 
   private isValid(t: ModelTokensResponse | null): t is ModelTokensResponse {
     if (!t?.access_token || !t?.expires_at) return false;
 
     const nowSec = Math.floor(Date.now() / 1000);
-    return nowSec < Math.floor(t.expires_at) - 10;
+    const expSec = Math.floor(Number(t.expires_at));
+
+    return Number.isFinite(expSec) && nowSec < expSec - 10;
   }
 
   /**
-   * Возвращает access_token или кидает ошибку.
-   * НИКАКИХ сетевых запросов внутри — чтобы не было дублей и undefined.
+   * Никогда не возвращает undefined:
+   * - либо валидный token (string)
+   * - либо ошибка
    */
   getAccessToken(): Observable<string> {
     const current = this.tokens$.value;
@@ -63,12 +72,11 @@ export class ModelTokensService {
     }
 
     return throwError(
-      () => new Error('Model access token is missing or expired. Call /api/me first.'),
+      () =>
+        new Error(
+          'Model access token is missing or expired. Ensure /api/me was called and returned model_tokens.',
+        ),
     );
-  }
-
-  tokensState$(): Observable<ModelTokensResponse | null> {
-    return this.tokens$.asObservable();
   }
 
   clear(): void {

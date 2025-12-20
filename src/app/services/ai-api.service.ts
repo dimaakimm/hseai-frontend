@@ -22,10 +22,8 @@ interface RagRawResponse {
 
 @Injectable({ providedIn: 'root' })
 export class AiApiService {
-  // === classifier ===
   private readonly CLASSIFIER_URL = 'https://194.169.160.2:8443/predict';
 
-  // === RAG / predict ===
   private readonly RAG_URL =
     'https://platform.stratpro.hse.ru/pu-vleviczkaya-pa-hsetest/hsetest/predict';
 
@@ -34,51 +32,53 @@ export class AiApiService {
     private modelTokens: ModelTokensService,
   ) {}
 
-  /** общая функция: строим headers с Bearer */
-  private withBearerHeaders(): Observable<HttpHeaders> {
-    return this.modelTokens.getAccessToken().pipe(
-      map((token) => {
-        return new HttpHeaders({
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        });
-      }),
-    );
+  private buildHeaders(token: string): HttpHeaders {
+    const safe = (token ?? '').trim();
+    if (!safe) {
+      // это страховка: сюда мы вообще не должны попадать
+      throw new Error('Empty token while building Authorization header');
+    }
+
+    return new HttpHeaders({
+      Authorization: `Bearer ${safe}`,
+      'Content-Type': 'application/json',
+    });
   }
 
-  /**
-   * classifier
-   */
   classify(text: string): Observable<any | null> {
     const body = { text };
 
-    return this.withBearerHeaders().pipe(
-      switchMap((headers) =>
-        this.http.post<any>(this.CLASSIFIER_URL, body, { headers }).pipe(
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        let headers: HttpHeaders;
+        try {
+          headers = this.buildHeaders(token);
+        } catch (e) {
+          console.error('Classifier token build error', e);
+          return of(null);
+        }
+
+        return this.http.post<any>(this.CLASSIFIER_URL, body, { headers }).pipe(
           catchError((err) => {
-            // ⚠️ если тут ERR_CERT_AUTHORITY_INVALID — это TLS на IP, фронтом не лечится
             console.error('Ошибка classifier', err);
             return of(null);
           }),
-        ),
-      ),
+        );
+      }),
       catchError((err) => {
-        console.error('Token error for classifier', err);
+        console.error('Classifier token error', err);
         return of(null);
       }),
     );
   }
 
-  /**
-   * RAG predict
-   */
   predict(params: {
     question: string;
     questionFilters: any;
     userProfile: UserProfile;
     chatHistory: any[];
   }): Observable<PredictResult> {
-    const { question, questionFilters, userProfile, chatHistory } = params;
+    const { question, questionFilters, userProfile } = params;
 
     const questionFiltersToSend =
       questionFilters === null || questionFilters === undefined
@@ -88,7 +88,6 @@ export class AiApiService {
     const userFilters = userProfile.level;
     const campusFilters = userProfile.campus;
 
-    // chatHistory пока не используешь — оставляю как у тебя было
     const payload = {
       inputs: [
         { name: 'question', datatype: 'str', data: question, shape: 0 },
@@ -110,12 +109,7 @@ export class AiApiService {
           data: JSON.stringify([campusFilters]),
           shape: 0,
         },
-        {
-          name: 'chat_history',
-          datatype: 'str',
-          data: '{}',
-          shape: 0,
-        },
+        { name: 'chat_history', datatype: 'str', data: '{}', shape: 0 },
       ],
       output_fields: [
         { name: 'answer', datatype: 'str' },
@@ -123,17 +117,28 @@ export class AiApiService {
       ],
     };
 
-    return this.withBearerHeaders().pipe(
-      switchMap((headers) =>
-        this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }).pipe(
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        let headers: HttpHeaders;
+        try {
+          headers = this.buildHeaders(token);
+        } catch (e) {
+          console.error('RAG token build error', e);
+          return of<PredictResult>({
+            answer: 'Не удалось получить токен модели. Перезайдите.',
+            sources: 'auth',
+          });
+        }
+
+        return this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }).pipe(
           map((response) => {
             const answerOutput = response.outputs.find((o) => o.name === 'answer');
             const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
 
-            const answer = (answerOutput?.data ?? null) as string | null;
-            const sources = (sourcesOutput?.data ?? null) as string | null;
-
-            return { answer, sources };
+            return {
+              answer: (answerOutput?.data ?? null) as string | null,
+              sources: (sourcesOutput?.data ?? null) as string | null,
+            };
           }),
           catchError((err) => {
             console.error('Ошибка RAG predict', err);
@@ -142,10 +147,10 @@ export class AiApiService {
               sources: 'error',
             });
           }),
-        ),
-      ),
+        );
+      }),
       catchError((err) => {
-        console.error('Token error for RAG', err);
+        console.error('RAG token error', err);
         return of<PredictResult>({
           answer: 'Вы не авторизованы или токен модели истёк. Перезайдите.',
           sources: 'auth',
@@ -154,10 +159,6 @@ export class AiApiService {
     );
   }
 
-  /**
-   * 1) classifier
-   * 2) predict
-   */
   askWithClassification(params: {
     question: string;
     userProfile: UserProfile;
