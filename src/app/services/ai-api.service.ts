@@ -4,6 +4,59 @@ import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { UserProfile } from '../models/user-profile.model';
 import { ModelTokensService } from '../shared/auth/model-tokens.service';
 
+interface ClassifierOutput {
+  name: string;
+  datatype: string;
+  data: string | null;
+  shape?: any;
+  content_type?: any;
+}
+
+interface ClassifierRawResponse {
+  outputs: ClassifierOutput[];
+}
+
+export interface ClassifierResult {
+  question: string | null;
+  predicted_category: string | null;
+  confidence: number | null;
+  is_inappropriate: boolean | null;
+  top_categories: Array<{ category: string; confidence: number }> | null;
+}
+
+function parseBoolStr(v: string | null): boolean | null {
+  if (v === null) return null;
+  const s = v.trim().toLowerCase();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  return null;
+}
+
+function parseJsonSafe<T>(v: string | null): T | null {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
+}
+
+function parseClassifierResponse(resp: ClassifierRawResponse): ClassifierResult {
+  const get = (name: string): string | null =>
+    resp.outputs?.find((o) => o.name === name)?.data ?? null;
+
+  const confidenceStr = get('confidence');
+  const topStr = get('top_categories');
+
+  return {
+    question: get('question'),
+    predicted_category: get('predicted_category'),
+    confidence: confidenceStr ? Number(confidenceStr) : null,
+    is_inappropriate: parseBoolStr(get('is_inappropriate')),
+    top_categories: parseJsonSafe<Array<{ category: string; confidence: number }>>(topStr),
+  };
+}
+
 export interface PredictResult {
   answer: string | null;
   sources: string | null;
@@ -42,15 +95,14 @@ export class AiApiService {
     });
   }
 
-  classify(question: string): Observable<any | null> {
-    // echo_request как ты просил
+  classify(question: string): Observable<ClassifierResult | null> {
     const echo_request = {
       inputs: [
         {
           name: 'question',
           data: question,
           datatype: 'str',
-          shape: question.length, // как ты написал: len(question)
+          shape: question.length,
         },
       ],
       output_fields: [
@@ -65,22 +117,22 @@ export class AiApiService {
     return this.modelTokens.getAccessToken().pipe(
       switchMap((token) => {
         const safe = (token ?? '').trim();
-        if (!safe) {
-          console.error('Classifier: пустой access_token');
-          return of(null);
-        }
+        if (!safe) return of(null);
 
         const headers = new HttpHeaders({
           Authorization: `Bearer ${safe}`,
           'Content-Type': 'application/json',
         });
 
-        return this.http.post<any>(this.CLASSIFIER_URL, echo_request, { headers }).pipe(
-          catchError((err) => {
-            console.error('Ошибка classifier', err);
-            return of(null);
-          }),
-        );
+        return this.http
+          .post<ClassifierRawResponse>(this.CLASSIFIER_URL, echo_request, { headers })
+          .pipe(
+            map((resp) => parseClassifierResponse(resp)),
+            catchError((err) => {
+              console.error('Ошибка classifier', err);
+              return of(null);
+            }),
+          );
       }),
       catchError((err) => {
         console.error('Classifier token error', err);
@@ -97,10 +149,7 @@ export class AiApiService {
   }): Observable<PredictResult> {
     const { question, questionFilters, userProfile } = params;
 
-    const questionFiltersToSend =
-      questionFilters === null || questionFilters === undefined
-        ? {}
-        : questionFilters.predicted_category;
+    const questionFiltersToSend = questionFilters?.predicted_category ?? {};
 
     const payload = {
       inputs: [
