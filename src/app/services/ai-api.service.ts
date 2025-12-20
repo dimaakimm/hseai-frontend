@@ -42,18 +42,40 @@ export class AiApiService {
     });
   }
 
-  classify(text: string): Observable<any | null> {
-    const body = { text };
+  classify(question: string): Observable<any | null> {
+    // echo_request как ты просил
+    const echo_request = {
+      inputs: [
+        {
+          name: 'question',
+          data: question,
+          datatype: 'str',
+          shape: question.length, // как ты написал: len(question)
+        },
+      ],
+      output_fields: [
+        { name: 'question', datatype: 'str' },
+        { name: 'predicted_category', datatype: 'str' },
+        { name: 'confidence', datatype: 'str' },
+        { name: 'is_inappropriate', datatype: 'str' },
+        { name: 'top_categories', datatype: 'str' },
+      ],
+    };
 
     return this.modelTokens.getAccessToken().pipe(
       switchMap((token) => {
-        const headers = this.buildHeaders(token);
-        if (!headers) {
+        const safe = (token ?? '').trim();
+        if (!safe) {
           console.error('Classifier: пустой access_token');
           return of(null);
         }
 
-        return this.http.post<any>(this.CLASSIFIER_URL, body, { headers }).pipe(
+        const headers = new HttpHeaders({
+          Authorization: `Bearer ${safe}`,
+          'Content-Type': 'application/json',
+        });
+
+        return this.http.post<any>(this.CLASSIFIER_URL, echo_request, { headers }).pipe(
           catchError((err) => {
             console.error('Ошибка classifier', err);
             return of(null);
