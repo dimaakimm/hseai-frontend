@@ -1,16 +1,31 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, map, of, switchMap, tap, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, map, of, tap, throwError } from 'rxjs';
 
 export interface ModelTokensResponse {
   access_token: string;
-  expires_at: number; // unix seconds (судя по твоему примеру)
+  expires_at: number; // unix seconds
   expires_in: number; // seconds
   token_type: string; // "Bearer"
   refresh_token?: string;
   refresh_expires_in?: number;
   scope?: string;
   session_state?: string;
+  [key: string]: any;
+}
+
+/**
+ * Новый формат, который приходит с /api/me:
+ * {
+ *   user: {...},
+ *   session_created_at: ...,
+ *   model_tokens: {...}
+ * }
+ */
+export interface MeWithModelTokensResponse {
+  user: Record<string, any>;
+  session_created_at: number;
+  model_tokens?: ModelTokensResponse | null;
   [key: string]: any;
 }
 
@@ -23,7 +38,23 @@ export class ModelTokensService {
 
   constructor(private http: HttpClient) {}
 
-  /** Явно дернуть токены (обязательно с куками) */
+  /**
+   * Установить токены из ответа /api/me (где они лежат в поле model_tokens).
+   * Вызывай это сразу после успешного ME_URL.
+   */
+  setFromMeResponse(me: MeWithModelTokensResponse | null | undefined): void {
+    const t = me?.model_tokens ?? null;
+
+    // если бэк внезапно не прислал токены — просто очистим, чтобы не использовать мусор
+    if (!t?.access_token) {
+      this.tokens$.next(null);
+      return;
+    }
+
+    this.tokens$.next(t);
+  }
+
+  /** Явно дернуть токены отдельной ручкой (обязательно с куками) — fallback */
   fetchTokens(): Observable<ModelTokensResponse> {
     return this.http
       .get<ModelTokensResponse>(this.TOKENS_URL, { withCredentials: true })
@@ -40,8 +71,9 @@ export class ModelTokensService {
   }
 
   /**
-   * Отдаёт access token. Если нет/протух — обновляет через /get_model_tokens.
-   * Это удобно дергать перед каждым запросом к модели/классификатору.
+   * Отдаёт access token.
+   * - Если токен уже есть и валиден — возвращаем его.
+   * - Если токена нет/протух — пробуем обновить через /get_model_tokens (fallback).
    */
   getAccessToken(): Observable<string> {
     const current = this.tokens$.value;
@@ -52,10 +84,7 @@ export class ModelTokensService {
 
     return this.fetchTokens().pipe(
       map((t) => t.access_token),
-      catchError((err) => {
-        // здесь важно не молча проглатывать, иначе ты не поймешь, почему модель не отвечает
-        return throwError(() => err);
-      }),
+      catchError((err) => throwError(() => err)),
     );
   }
 
