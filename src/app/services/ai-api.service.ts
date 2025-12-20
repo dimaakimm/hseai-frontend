@@ -23,49 +23,54 @@ interface RagRawResponse {
 @Injectable({ providedIn: 'root' })
 export class AiApiService {
   // === classifier ===
-  private readonly CLASSIFIER_URL =
-    'https://platform.stratpro.hse.ru/pu-sp4-pa-newcls/deploy_version/predict';
+  private readonly CLASSIFIER_URL = 'https://194.169.160.2:8443/predict';
 
   // === RAG / predict ===
   private readonly RAG_URL =
-    'https://platform.stratpro.hse.ru/pu-sp4-pa-hse-model/deploy_version/predict';
+    'https://platform.stratpro.hse.ru/pu-vleviczkaya-pa-hsetest/hsetest/predict';
 
   constructor(
     private http: HttpClient,
     private modelTokens: ModelTokensService,
   ) {}
 
+  /** общая функция: строим headers с Bearer */
+  private withBearerHeaders(): Observable<HttpHeaders> {
+    return this.modelTokens.getAccessToken().pipe(
+      map((token) => {
+        return new HttpHeaders({
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        });
+      }),
+    );
+  }
+
   /**
-   * classifier: отправляем текст и получаем категории.
-   * Authorization теперь Bearer <access_token>
+   * classifier
    */
   classify(text: string): Observable<any | null> {
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const headers = new HttpHeaders({
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        });
+    const body = { text };
 
-        const body = { text };
-
-        return this.http.post<any>(this.CLASSIFIER_URL, body, { headers }).pipe(
+    return this.withBearerHeaders().pipe(
+      switchMap((headers) =>
+        this.http.post<any>(this.CLASSIFIER_URL, body, { headers }).pipe(
           catchError((err) => {
+            // ⚠️ если тут ERR_CERT_AUTHORITY_INVALID — это TLS на IP, фронтом не лечится
             console.error('Ошибка classifier', err);
             return of(null);
           }),
-        );
-      }),
+        ),
+      ),
       catchError((err) => {
-        console.error('Не смог получить access_token для classifier', err);
+        console.error('Token error for classifier', err);
         return of(null);
       }),
     );
   }
 
   /**
-   * Чистый запрос к RAG (predict).
-   * Authorization теперь Bearer <access_token>
+   * RAG predict
    */
   predict(params: {
     question: string;
@@ -83,6 +88,7 @@ export class AiApiService {
     const userFilters = userProfile.level;
     const campusFilters = userProfile.campus;
 
+    // chatHistory пока не используешь — оставляю как у тебя было
     const payload = {
       inputs: [
         { name: 'question', datatype: 'str', data: question, shape: 0 },
@@ -117,14 +123,9 @@ export class AiApiService {
       ],
     };
 
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const headers = new HttpHeaders({
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        });
-
-        return this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }).pipe(
+    return this.withBearerHeaders().pipe(
+      switchMap((headers) =>
+        this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }).pipe(
           map((response) => {
             const answerOutput = response.outputs.find((o) => o.name === 'answer');
             const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
@@ -137,27 +138,25 @@ export class AiApiService {
           catchError((err) => {
             console.error('Ошибка RAG predict', err);
             return of<PredictResult>({
-              answer: `HTTP error / network error`,
+              answer: 'HTTP error / network error',
               sources: 'error',
             });
           }),
-        );
-      }),
+        ),
+      ),
       catchError((err) => {
-        console.error('Не смог получить access_token для RAG', err);
+        console.error('Token error for RAG', err);
         return of<PredictResult>({
-          answer: `token error`,
-          sources: 'error',
+          answer: 'Вы не авторизованы или токен модели истёк. Перезайдите.',
+          sources: 'auth',
         });
       }),
     );
   }
 
   /**
-   * Высокоуровневая функция:
-   * 1) вызывает classifier
-   * 2) кладёт его результат в question_filters
-   * 3) затем вызывает predict
+   * 1) classifier
+   * 2) predict
    */
   askWithClassification(params: {
     question: string;
