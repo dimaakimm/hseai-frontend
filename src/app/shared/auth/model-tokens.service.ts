@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { BehaviorSubject, Observable, catchError, map, of, tap, throwError } from 'rxjs';
 
 export interface ModelTokensResponse {
   access_token: string;
@@ -13,41 +14,29 @@ export interface ModelTokensResponse {
   [key: string]: any;
 }
 
-export interface MeWithModelTokensResponse {
+export interface TokensEnvelopeResponse {
   user: Record<string, any>;
   session_created_at: number;
-  model_tokens?: ModelTokensResponse | null;
+  model_tokens: ModelTokensResponse;
   [key: string]: any;
 }
 
 @Injectable({ providedIn: 'root' })
 export class ModelTokensService {
+  private readonly API_BASE = 'https://api.hse-ai.ru';
+  private readonly TOKENS_URL = `${this.API_BASE}/get_model_tokens`;
+
   private readonly tokens$ = new BehaviorSubject<ModelTokensResponse | null>(null);
 
-  setFromMeResponse(me: MeWithModelTokensResponse | null | undefined): void {
-    const t = me?.model_tokens ?? null;
+  constructor(private http: HttpClient) {}
 
-    if (!t || typeof t.access_token !== 'string' || t.access_token.trim().length === 0) {
-      console.warn('[ModelTokensService] model_tokens отсутствует или access_token пустой', t);
-      this.tokens$.next(null);
-      return;
-    }
-
-    const expiresAtSec = Math.floor(Number(t.expires_at));
-    if (!Number.isFinite(expiresAtSec) || expiresAtSec <= 0) {
-      console.warn('[ModelTokensService] expires_at некорректный, сохраняю как есть', t.expires_at);
-    }
-
-    const normalized: ModelTokensResponse = {
+  /** Нормализуем токены (expires_at может быть float) */
+  private normalize(t: ModelTokensResponse): ModelTokensResponse {
+    return {
       ...t,
-      expires_at: Number.isFinite(expiresAtSec) ? expiresAtSec : t.expires_at,
-      access_token: t.access_token.trim(),
+      access_token: (t.access_token ?? '').trim(),
+      expires_at: Math.floor(Number(t.expires_at)),
     };
-
-    this.tokens$.next(normalized);
-
-    // 🔍 диагностический лог (убери потом)
-    console.log('[ModelTokensService] token set, exp=', normalized.expires_at);
   }
 
   private isValid(t: ModelTokensResponse | null): t is ModelTokensResponse {
@@ -60,9 +49,38 @@ export class ModelTokensService {
   }
 
   /**
-   * Никогда не возвращает undefined:
-   * - либо валидный token (string)
-   * - либо ошибка
+   * ✅ Правильный fetchTokens:
+   * /get_model_tokens возвращает ОБЁРТКУ, токены внутри model_tokens
+   */
+  fetchTokens(): Observable<ModelTokensResponse> {
+    return this.http.get<TokensEnvelopeResponse>(this.TOKENS_URL, { withCredentials: true }).pipe(
+      map((resp) => resp?.model_tokens),
+      map((t) => {
+        if (!t || typeof t.access_token !== 'string' || t.access_token.trim().length === 0) {
+          throw new Error('get_model_tokens: model_tokens.access_token is empty');
+        }
+        return this.normalize(t);
+      }),
+      tap((t) => this.tokens$.next(t)),
+    );
+  }
+
+  /**
+   * Установить токены из любого объекта, где есть model_tokens
+   * (если ты получаешь их из /api/me или из /get_model_tokens — без разницы)
+   */
+  setFromEnvelope(resp: Partial<TokensEnvelopeResponse> | null | undefined): void {
+    const t = resp?.model_tokens;
+    if (!t || typeof t.access_token !== 'string' || t.access_token.trim().length === 0) {
+      this.tokens$.next(null);
+      return;
+    }
+    this.tokens$.next(this.normalize(t));
+  }
+
+  /**
+   * Возвращает access token.
+   * Если токена нет/протух — обновляем через /get_model_tokens (и уже корректно парсим!)
    */
   getAccessToken(): Observable<string> {
     const current = this.tokens$.value;
@@ -71,11 +89,9 @@ export class ModelTokensService {
       return of(current.access_token);
     }
 
-    return throwError(
-      () =>
-        new Error(
-          'Model access token is missing or expired. Ensure /api/me was called and returned model_tokens.',
-        ),
+    return this.fetchTokens().pipe(
+      map((t) => t.access_token),
+      catchError((err) => throwError(() => err)),
     );
   }
 

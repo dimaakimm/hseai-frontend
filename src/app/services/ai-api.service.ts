@@ -23,7 +23,6 @@ interface RagRawResponse {
 @Injectable({ providedIn: 'root' })
 export class AiApiService {
   private readonly CLASSIFIER_URL = 'https://194.169.160.2:8443/predict';
-
   private readonly RAG_URL =
     'https://platform.stratpro.hse.ru/pu-vleviczkaya-pa-hsetest/hsetest/predict';
 
@@ -32,12 +31,9 @@ export class AiApiService {
     private modelTokens: ModelTokensService,
   ) {}
 
-  private buildHeaders(token: string): HttpHeaders {
+  private buildHeaders(token: string): HttpHeaders | null {
     const safe = (token ?? '').trim();
-    if (!safe) {
-      // это страховка: сюда мы вообще не должны попадать
-      throw new Error('Empty token while building Authorization header');
-    }
+    if (!safe) return null;
 
     return new HttpHeaders({
       Authorization: `Bearer ${safe}`,
@@ -50,11 +46,9 @@ export class AiApiService {
 
     return this.modelTokens.getAccessToken().pipe(
       switchMap((token) => {
-        let headers: HttpHeaders;
-        try {
-          headers = this.buildHeaders(token);
-        } catch (e) {
-          console.error('Classifier token build error', e);
+        const headers = this.buildHeaders(token);
+        if (!headers) {
+          console.error('Classifier: пустой access_token');
           return of(null);
         }
 
@@ -85,9 +79,6 @@ export class AiApiService {
         ? {}
         : questionFilters.predicted_category;
 
-    const userFilters = userProfile.level;
-    const campusFilters = userProfile.campus;
-
     const payload = {
       inputs: [
         { name: 'question', datatype: 'str', data: question, shape: 0 },
@@ -100,13 +91,13 @@ export class AiApiService {
         {
           name: 'user_filters',
           datatype: 'str',
-          data: JSON.stringify([userFilters]),
+          data: JSON.stringify([userProfile.level]),
           shape: 0,
         },
         {
           name: 'campus_filters',
           datatype: 'str',
-          data: JSON.stringify([campusFilters]),
+          data: JSON.stringify([userProfile.campus]),
           shape: 0,
         },
         { name: 'chat_history', datatype: 'str', data: '{}', shape: 0 },
@@ -119,11 +110,8 @@ export class AiApiService {
 
     return this.modelTokens.getAccessToken().pipe(
       switchMap((token) => {
-        let headers: HttpHeaders;
-        try {
-          headers = this.buildHeaders(token);
-        } catch (e) {
-          console.error('RAG token build error', e);
+        const headers = this.buildHeaders(token);
+        if (!headers) {
           return of<PredictResult>({
             answer: 'Не удалось получить токен модели. Перезайдите.',
             sources: 'auth',
@@ -142,10 +130,7 @@ export class AiApiService {
           }),
           catchError((err) => {
             console.error('Ошибка RAG predict', err);
-            return of<PredictResult>({
-              answer: 'HTTP error / network error',
-              sources: 'error',
-            });
+            return of<PredictResult>({ answer: 'HTTP error / network error', sources: 'error' });
           }),
         );
       }),
@@ -176,7 +161,7 @@ export class AiApiService {
         }),
       ),
       catchError((err) => {
-        console.error('askWithClassification: ошибка, fallback без classifier', err);
+        console.error('askWithClassification fallback', err);
         return this.predict({
           question,
           questionFilters: {},
