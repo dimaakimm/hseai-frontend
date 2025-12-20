@@ -22,9 +22,10 @@ interface RagRawResponse {
 
 @Injectable({ providedIn: 'root' })
 export class AiApiService {
-  private readonly CLASSIFIER_URL = 'https://194.169.160.2:8443/predict';
+  private readonly CLASSIFIER_URL =
+    'https://platform.stratpro.hse.ru/pu-sp4-pa-newcls/deploy_version/predict';
   private readonly RAG_URL =
-    'https://platform.stratpro.hse.ru/pu-vleviczkaya-pa-hsetest/hsetest/predict';
+    'https://platform.stratpro.hse.ru/pu-sp4-pa-hse-model/deploy_version/predict';
 
   constructor(
     private http: HttpClient,
