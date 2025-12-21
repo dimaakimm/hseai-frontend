@@ -54,7 +54,7 @@ export class AuthService {
         this.modelTokens.clear();
         this.state$.next({
           status: 'error',
-          message: 'Не удалось проверить авторизацию (network/server error).',
+          message: 'Вы не авторизованы',
         });
         return of(this.state$.value);
       }),

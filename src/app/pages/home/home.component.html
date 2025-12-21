@@ -3,7 +3,7 @@
     @case ('loading') { <div>Проверяю авторизацию...</div> }
     @case ('unauthorized') {
       <div>Вы не авторизованы</div>
-      <button type="button" (click)="login()">Авторизоваться</button>
+      <button type="button"  class="auth-button" (click)="login()">Авторизоваться</button>
     }
     @case ('authorized') {
       <div>Вы авторизованы как {{ formatName(s) }}, {{ formatEmail(s) }}</div>

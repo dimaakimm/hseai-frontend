@@ -15,6 +15,7 @@ import { ChatPopupComponent } from './features/chat/chat-popup/chat-popup.compon
   standalone: true,
   imports: [CommonModule, RouterOutlet, ChatPopupComponent],
   templateUrl: './app.component.html',
+  styleUrls: ['./app.component.scss'],
 })
 export class AppComponent {
   state$: Observable<AuthState>;

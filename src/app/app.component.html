@@ -22,7 +22,7 @@
             Вы не авторизованы
           </p>
 
-          <button type="button" (click)="login()">
+          <button type="button" class="auth-button" (click)="login()">
             Авторизоваться
           </button>
         }
@@ -32,7 +32,7 @@
             Вы авторизованы как {{ formatName(s) }}, {{ formatEmail(s) }}
           </p>
 
-          <button type="button" (click)="changeAccount()">
+          <button type="button" class="auth-button" (click)="changeAccount()">
             Сменить аккаунт
           </button>
         }
@@ -42,7 +42,7 @@
             {{ s.message }}
           </p>
 
-          <button type="button" (click)="login()">
+          <button type="button"  class="auth-button" (click)="login()">
             Авторизоваться
           </button>
         }
