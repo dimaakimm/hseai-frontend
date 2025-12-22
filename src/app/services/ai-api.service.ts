@@ -93,9 +93,9 @@ export class AiApiService {
 
   // ====== CLASSIFIER ======
 
+  // ai-api.service.ts
   classify(question: string): Observable<any | null> {
-    // твой нужный echo_request
-    const payload = {
+    const echo_request = {
       inputs: [
         {
           name: 'question',
@@ -113,11 +113,20 @@ export class AiApiService {
       ],
     };
 
-    return this.withTokenRetryOnAuthError((headers) =>
-      this.http.post<any>(this.CLASSIFIER_URL, payload, { headers }),
-    ).pipe(
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        const headers = this.buildHeaders(token);
+        if (!headers) return of(null);
+
+        return this.http.post<any>(this.CLASSIFIER_URL, echo_request, { headers }).pipe(
+          catchError((err) => {
+            console.error('Ошибка classifier', err);
+            return of(null);
+          }),
+        );
+      }),
       catchError((err) => {
-        console.error('Ошибка classifier', err);
+        console.error('Classifier token error', err);
         return of(null);
       }),
     );

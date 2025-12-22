@@ -260,9 +260,13 @@ export class ChatPopupComponent implements OnInit {
       next: (res: any) => {
         this.questionFiltersRaw = res;
 
-        const isInappropriate = res?.is_inappropriate === true;
+        const outs = Array.isArray(res?.outputs) ? res.outputs : [];
+        const get = (name: string) => outs.find((o: any) => o?.name === name)?.data;
+
+        const predictedCategory = String(get('predicted_category') ?? '').trim();
+        const confidence = Number(get('confidence') ?? 0);
+        const isInappropriate = String(get('is_inappropriate') ?? 'false').toLowerCase() === 'true';
         if (isInappropriate) {
-          // Вопрос неподходящий — просим задать заново
           this.addBotMessage(
             'Похоже, вопрос сформулирован некорректно или не относится к учебным процессам Вышки. ' +
               'Пожалуйста, переформулируй вопрос и попробуй ещё раз.',
@@ -271,16 +275,17 @@ export class ChatPopupComponent implements OnInit {
           return;
         }
 
-        const predictedCategory: string | undefined = res?.predicted_category;
-        const confidence: number = typeof res?.confidence === 'number' ? res.confidence : 0;
-
         if (predictedCategory && confidence > 0) {
-          // Модель уверена — просто сообщаем категорию и сразу идём в RAG
+          // кладём категорию в raw, чтобы RAG использовал её
+          this.questionFiltersRaw = {
+            predicted_category: predictedCategory,
+            confidence,
+          };
+
           this.currentCategory = predictedCategory;
           this.addBotMessage(`Категория твоего вопроса: ${this.currentCategory}.`);
           this.callModel();
         } else {
-          // confidence == 0 или нет категории — просим выбрать руками
           this.stage = 'chooseCategory';
           this.addBotMessage(
             'Я не смог автоматически определить категорию твоего вопроса. ' +
