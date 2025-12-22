@@ -54,11 +54,13 @@
 
   <!-- Показываем чат ТОЛЬКО если авторизован -->
   @if (state$ | async; as s) {
-    <app-chat-popup
-      [authName]="formatName(s)"
-      [userProfile]="userProfile"
-      [feedbackUrl]="feedbackUrl"
-      (userProfileChange)="onUserProfileChange($event)"
-    ></app-chat-popup>
+    @if (s.status ==='authorized'){
+      <app-chat-popup
+        [authName]="formatName(s)"
+        [userProfile]="userProfile"
+        [feedbackUrl]="feedbackUrl"
+        (userProfileChange)="onUserProfileChange($event)"
+      ></app-chat-popup>
+    }
   }
 </main>
