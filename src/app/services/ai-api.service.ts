@@ -1,9 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, defer, throwError, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
-
-import { AuthService } from '../shared/auth/auth.service';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { UserProfile } from '../models/user-profile.model';
 import { ModelTokensService } from '../shared/auth/model-tokens.service';
 
@@ -17,7 +14,9 @@ interface RagOutput {
   datatype: string;
   data: string | null;
   shape?: number | number[];
+  content_type?: string | null;
 }
+
 interface RagRawResponse {
   outputs: RagOutput[];
 }
@@ -31,116 +30,90 @@ export class AiApiService {
 
   constructor(
     private http: HttpClient,
-    private auth: AuthService,
     private modelTokens: ModelTokensService,
   ) {}
 
-  private isAuthLikeError(err: any): boolean {
-    const s = err?.status;
-    return s === 401 || s === 403;
+  private buildHeaders(token: string): HttpHeaders {
+    return new HttpHeaders({
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    });
   }
 
-  /** универсальная обёртка: если токен протух — refresh /me, потом retry один раз */
-  private withMeRefreshRetry<T>(requestFactory: () => Observable<T>): Observable<T> {
-    return defer(() => requestFactory()).pipe(
-      catchError((err) => {
-        if (!this.isAuthLikeError(err)) {
-          return throwError(() => err);
+  private pickOutput(response: RagRawResponse, name: string): string | null {
+    const out = response?.outputs?.find((o) => o?.name === name);
+    return out?.data ?? null;
+  }
+
+  /** ✅ classifier "как было": inputs/output_fields */
+  classify(question: string): Observable<{
+    question?: string;
+    predicted_category?: string;
+    confidence?: number;
+    is_inappropriate?: boolean;
+    top_categories?: any;
+  } | null> {
+    const echo_request = {
+      inputs: [
+        {
+          name: 'question',
+          data: question,
+          datatype: 'str',
+          // shape как было у тебя: len(question). В JS это question.length
+          shape: question.length,
+        },
+      ],
+      output_fields: [
+        { name: 'question', datatype: 'str' },
+        { name: 'predicted_category', datatype: 'str' },
+        { name: 'confidence', datatype: 'str' },
+        { name: 'is_inappropriate', datatype: 'str' },
+        { name: 'top_categories', datatype: 'str' },
+      ],
+    };
+
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        const safe = (token ?? '').trim();
+        if (!safe) {
+          console.error('Classifier: пустой access_token');
+          return of(null);
         }
 
-        // 1) пробуем обновить сессию через /me (бэк там обновит model_tokens)
-        return this.auth.refreshMe().pipe(
-          // 2) если /me ок — повторяем исходный запрос
-          switchMap(() => defer(() => requestFactory())),
-          catchError((meErr) => {
-            // если /me тоже 401/403 — значит реально не авторизован
-            if (this.isAuthLikeError(meErr)) {
-              this.auth.setUnauthorized();
-              return throwError(() => ({ code: 'UNAUTHORIZED' as const }));
-            }
-            return throwError(() => meErr);
-          }),
-        );
-      }),
-    );
-  }
+        return this.http
+          .post<RagRawResponse>(this.CLASSIFIER_URL, echo_request, {
+            headers: this.buildHeaders(safe),
+          })
+          .pipe(
+            map((resp) => {
+              const predicted_category = this.pickOutput(resp, 'predicted_category');
+              const confidenceStr = this.pickOutput(resp, 'confidence');
+              const is_inappropriateStr = this.pickOutput(resp, 'is_inappropriate');
+              const top_categoriesStr = this.pickOutput(resp, 'top_categories');
 
-  /** classifier в формате echo_request (как ты требовал) + Authorization: Bearer <model_access_token> */
-  classify(question: string): Observable<any> {
-    return this.withMeRefreshRetry(() =>
-      this.modelTokens.getAccessToken().pipe(
-        switchMap((token) => {
-          const headers = new HttpHeaders({
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          });
-
-          const body = {
-            inputs: [
-              {
-                name: 'question',
-                data: question,
-                datatype: 'str',
-                shape: question.length,
-              },
-            ],
-            output_fields: [
-              { name: 'question', datatype: 'str' },
-              { name: 'predicted_category', datatype: 'str' },
-              { name: 'confidence', datatype: 'str' },
-              { name: 'is_inappropriate', datatype: 'str' },
-              { name: 'top_categories', datatype: 'str' },
-            ],
-          };
-
-          return this.http.post<any>(this.CLASSIFIER_URL, body, { headers });
-        }),
-      ),
-    );
-  }
-
-  askWithClassification(params: {
-    question: string;
-    userProfile: UserProfile;
-    chatHistory: any[];
-  }): Observable<PredictResult> {
-    const { question, userProfile, chatHistory } = params;
-
-    return this.classify(question).pipe(
-      // если classify вернул RagRawResponse(outputs) — преобразуем в {predicted_category, confidence, ...}
-      map((res: any) => {
-        // если у тебя classify уже отдаёт "плоский" объект — просто верни res
-        if (!res?.outputs) return res;
-
-        const get = (name: string) => res.outputs.find((o: any) => o?.name === name)?.data;
-
-        const predicted_category = get('predicted_category');
-        const confidenceRaw = get('confidence');
-
-        return {
-          predicted_category,
-          confidence: confidenceRaw != null ? Number(confidenceRaw) : 0,
-          is_inappropriate: get('is_inappropriate') === 'true',
-          top_categories: get('top_categories'),
-        };
+              return {
+                question: this.pickOutput(resp, 'question') ?? question,
+                predicted_category: predicted_category ?? undefined,
+                confidence: confidenceStr != null ? Number(confidenceStr) : 0,
+                is_inappropriate: is_inappropriateStr === 'true',
+                top_categories:
+                  top_categoriesStr != null ? this.safeJsonParse(top_categoriesStr) : undefined,
+              };
+            }),
+            catchError((err) => {
+              console.error('Ошибка classifier', err);
+              return of(null);
+            }),
+          );
       }),
       catchError((err) => {
-        // если classifier упал — идём дальше с пустыми фильтрами
-        console.error('Ошибка classifier', err);
-        return of({});
+        console.error('Classifier token error', err);
+        return of(null);
       }),
-      switchMap((questionFilters) =>
-        this.predict({
-          question,
-          questionFilters,
-          userProfile,
-          chatHistory,
-        }),
-      ),
     );
   }
 
-  /** RAG predict: авторизация Bearer тем же model access token */
+  /** ✅ RAG predict (у тебя уже был "как было", оставил) */
   predict(params: {
     question: string;
     questionFilters: any;
@@ -183,26 +156,79 @@ export class AiApiService {
       ],
     };
 
-    return this.withMeRefreshRetry(() =>
-      this.modelTokens.getAccessToken().pipe(
-        switchMap((token) => {
-          const headers = new HttpHeaders({
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        const safe = (token ?? '').trim();
+        if (!safe) {
+          return of<PredictResult>({
+            answer: 'Не удалось получить токен модели. Перезайдите.',
+            sources: 'auth',
           });
+        }
 
-          return this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers });
-        }),
-        map((response) => {
-          const answerOutput = response.outputs.find((o) => o.name === 'answer');
-          const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
+        return this.http
+          .post<RagRawResponse>(this.RAG_URL, payload, {
+            headers: this.buildHeaders(safe),
+          })
+          .pipe(
+            map((response) => {
+              return {
+                answer: this.pickOutput(response, 'answer'),
+                sources: this.pickOutput(response, 'sources'),
+              };
+            }),
+            catchError((err) => {
+              console.error('Ошибка RAG predict', err);
+              return of<PredictResult>({
+                answer: 'HTTP error / network error',
+                sources: 'error',
+              });
+            }),
+          );
+      }),
+      catchError((err) => {
+        console.error('RAG token error', err);
+        return of<PredictResult>({
+          answer: 'Вы не авторизованы или токен модели истёк. Перезайдите.',
+          sources: 'auth',
+        });
+      }),
+    );
+  }
 
-          return {
-            answer: (answerOutput?.data ?? null) as string | null,
-            sources: (sourcesOutput?.data ?? null) as string | null,
-          };
+  askWithClassification(params: {
+    question: string;
+    userProfile: UserProfile;
+    chatHistory: any[];
+  }): Observable<PredictResult> {
+    const { question, userProfile, chatHistory } = params;
+
+    return this.classify(question).pipe(
+      switchMap((questionFilters) =>
+        this.predict({
+          question,
+          questionFilters,
+          userProfile,
+          chatHistory,
         }),
       ),
+      catchError((err) => {
+        console.error('askWithClassification fallback', err);
+        return this.predict({
+          question,
+          questionFilters: {},
+          userProfile,
+          chatHistory,
+        });
+      }),
     );
+  }
+
+  private safeJsonParse(value: string): any {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
   }
 }
