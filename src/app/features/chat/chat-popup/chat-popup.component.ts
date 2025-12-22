@@ -9,9 +9,8 @@ import {
   ViewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { UserProfile } from '../../../models/user-profile.model';
+import { Campus, EducationLevel, UserProfile } from '../../../models/user-profile.model';
 import { AiApiService } from '../../../services/ai-api.service';
-
 const USER_PROFILE_STORAGE_KEY = 'hseChatUserProfile';
 
 type ChatStage =
@@ -69,6 +68,10 @@ export class ChatPopupComponent implements OnInit {
   @Input({ required: true })
   userProfile!: UserProfile;
   nameError: string | null = null;
+  @Input() authName?: string;
+
+  readonly campuses: Campus[] = ['Москва', 'Санкт-Петербург', 'Нижний Новгород', 'Пермь'];
+  readonly levels: EducationLevel[] = ['бакалавриат', 'специалитет', 'магистратура', 'аспирантура'];
 
   /** Сообщаем родителю, что профиль обновлён */
   @Output() userProfileChange = new EventEmitter<UserProfile>();
@@ -107,6 +110,7 @@ export class ChatPopupComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadUserProfileFromStorage();
+    this.userProfile = this.normalizeProfile(this.userProfile);
     this.toStartState();
   }
 
@@ -129,26 +133,14 @@ export class ChatPopupComponent implements OnInit {
     );
   }
 
-  private validateProfileDraft(): boolean {
-    this.nameError = null;
+  private normalizeProfile(p: Partial<UserProfile> | null | undefined): UserProfile {
+    const nameFromAuth = (this.authName ?? '').trim();
 
-    if (!this.userProfileDraft) {
-      this.isProfileSaveDisabled = true;
-      return false;
-    }
-
-    const raw = this.userProfileDraft.name ?? '';
-    const name = raw.trim();
-
-    // Имя необязательное, но если его ввели — должно быть не короче 3 символов
-    if (name && name.length < 3) {
-      this.nameError = 'Имя должно содержать не менее 3 символов.';
-    }
-
-    // если есть любая ошибка — дизейблим кнопку
-    this.isProfileSaveDisabled = !!this.nameError;
-
-    return !this.nameError;
+    return {
+      name: nameFromAuth,
+      campus: (p?.campus as any) ?? 'Москва',
+      level: (p?.level as any) ?? 'бакалавриат',
+    } as UserProfile;
   }
 
   // ---------- открытие / закрытие попапа ----------
@@ -535,7 +527,7 @@ export class ChatPopupComponent implements OnInit {
 
   openProfileView(): void {
     this.viewMode = 'profile';
-    this.userProfileDraft = { ...(this.userProfile ?? ({} as UserProfile)) };
+    this.userProfileDraft = this.normalizeProfile(this.userProfile);
   }
 
   onCancelProfileEdit(): void {
@@ -546,12 +538,12 @@ export class ChatPopupComponent implements OnInit {
   onSaveProfile(): void {
     if (!this.userProfileDraft) return;
 
-    // если валидация не пройдена — остаёмся в форме профиля
-    if (!this.validateProfileDraft()) {
-      return;
-    }
+    const nameFromAuth = (this.authName ?? '').trim();
 
-    this.userProfile = { ...this.userProfileDraft };
+    this.userProfile = {
+      ...this.userProfileDraft,
+      name: nameFromAuth,
+    };
 
     this.persistUserProfileToStorage();
     this.userProfileChange.emit(this.userProfile);
@@ -563,12 +555,6 @@ export class ChatPopupComponent implements OnInit {
     this.addBotMessage(
       'Параметры пользователя обновлены и сохранены. Можешь задать новый вопрос или уточнить текущий.',
     );
-  }
-
-  onNameChange(value: string): void {
-    if (!this.userProfileDraft) return;
-    this.userProfileDraft.name = value;
-    this.validateProfileDraft();
   }
 
   onInputKeydown(event: KeyboardEvent): void {
@@ -615,13 +601,15 @@ export class ChatPopupComponent implements OnInit {
       const raw = window.localStorage.getItem(USER_PROFILE_STORAGE_KEY);
       if (!raw) return;
 
-      const parsed = JSON.parse(raw) as UserProfile;
+      const parsed = JSON.parse(raw) as Partial<UserProfile>;
 
-      // Если в @Input уже что-то пришло — аккуратно мержим
+      const { campus, level } = parsed;
+
       this.userProfile = {
         ...(this.userProfile ?? ({} as UserProfile)),
-        ...parsed,
-      };
+        ...(campus ? { campus } : {}),
+        ...(level ? { level } : {}),
+      } as UserProfile;
     } catch (e) {
       console.warn('Не удалось прочитать профиль из localStorage', e);
     }
@@ -632,7 +620,10 @@ export class ChatPopupComponent implements OnInit {
     if (!this.userProfile) return;
 
     try {
-      const json = JSON.stringify(this.userProfile);
+      const json = JSON.stringify({
+        campus: this.userProfile.campus,
+        level: this.userProfile.level,
+      });
       window.localStorage.setItem(USER_PROFILE_STORAGE_KEY, json);
     } catch (e) {
       console.warn('Не удалось сохранить профиль в localStorage', e);

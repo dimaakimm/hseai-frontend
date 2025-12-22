@@ -7,3 +7,9 @@ export interface UserProfile {
   campus: Campus;
   level: EducationLevel;
 }
+
+export interface UserProfile {
+  name: string;
+  campus: Campus;
+  level: EducationLevel;
+}

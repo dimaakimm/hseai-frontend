@@ -202,42 +202,33 @@
               >
                 <div class="profile-form__row">
                   <label class="profile-form__label" for="profile-name">
-                    Имя (необязательно)
+                    Пользователь
                   </label>
+
                   <input
                     id="profile-name"
                     class="profile-form__control"
                     type="text"
                     name="profileName"
-                    [(ngModel)]="userProfileDraft.name"
-                    (ngModelChange)="onNameChange($event)"
-                    placeholder="Как к тебе обращаться?"
+                    [ngModel]="userProfileDraft.name"
+                    disabled
                   />
-
-                  @if (nameError) {
-                    <p class="profile-form__error">
-                      {{ nameError }}
-                    </p>
-                  }
                 </div>
-
 
                 <div class="profile-form__row">
                   <label class="profile-form__label" for="profile-level">
                     Уровень образования
                   </label>
+
                   <select
                     id="profile-level"
                     class="profile-form__control"
                     name="profileLevel"
                     [(ngModel)]="userProfileDraft.level"
                   >
-                    <option value="" disabled>Выбери уровень</option>
-                    <option value="бакалавриат">Бакалавриат</option>
-                    <option value="магистратура">Магистратура</option>
-                    <option value="аспирантура">Аспирантура</option>
-                    <option value="школа/лицей">Школа / лицей</option>
-                    <option value="другое">Другое</option>
+                    @for (l of levels; track l) {
+                      <option [value]="l">{{ l }}</option>
+                    }
                   </select>
                 </div>
 
@@ -245,21 +236,19 @@
                   <label class="profile-form__label" for="profile-campus">
                     Кампус
                   </label>
+
                   <select
                     id="profile-campus"
                     class="profile-form__control"
                     name="profileCampus"
                     [(ngModel)]="userProfileDraft.campus"
                   >
-                    <option value="" disabled>Выбери кампус</option>
-                    <option value="Москва">Москва</option>
-                    <option value="Санкт-Петербург">Санкт-Петербург</option>
-                    <option value="Нижний Новгород">Нижний Новгород</option>
-                    <option value="Пермь">Пермь</option>
-                    <option value="Онлайн">Онлайн</option>
-                    <option value="другое">Другое</option>
+                    @for (c of campuses; track c) {
+                      <option [value]="c">{{ c }}</option>
+                    }
                   </select>
                 </div>
+
 
                 <div class="profile-form__actions">
                   <button

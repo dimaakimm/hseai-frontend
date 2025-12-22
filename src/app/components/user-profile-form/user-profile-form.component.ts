@@ -1,15 +1,7 @@
 import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-
-export type Campus = 'Москва' | 'Санкт-Петербург' | 'Нижний Новгород' | 'Пермь';
-export type EducationLevel = 'бакалавриат' | 'специалитет' | 'магистратура' | 'аспирантура';
-
-export interface UserProfile {
-  name: string;
-  campus: Campus;
-  level: EducationLevel;
-}
+import { Campus, EducationLevel, UserProfile } from '../../models/user-profile.model';
 
 @Component({
   selector: 'app-user-profile-form',
