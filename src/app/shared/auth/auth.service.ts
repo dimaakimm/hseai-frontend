@@ -1,19 +1,20 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, map, of, switchMap } from 'rxjs';
+import { BehaviorSubject, Observable, of } from 'rxjs';
+import { catchError, finalize, shareReplay, tap, map } from 'rxjs/operators';
 
 import { AuthState, MeResponse } from './auth.models';
+import { environment } from '../../../environments/environment';
 import { ModelTokensService } from './model-tokens.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly API_BASE = 'https://api.hse-ai.ru';
+  private readonly API_BASE = environment.apiBaseUrl ?? 'https://api.hse-ai.ru';
   private readonly ME_URL = `${this.API_BASE}/api/me`;
 
-  private readonly LOGIN_URL = `${this.API_BASE}/auth/login`;
-  private readonly LOGOUT_URL = `${this.API_BASE}/auth/logout`;
+  private readonly state$ = new BehaviorSubject<AuthState>({ status: 'checking' });
 
-  private readonly state$ = new BehaviorSubject<AuthState>({ status: 'loading' });
+  private refreshInFlight$?: Observable<MeResponse>;
 
   constructor(
     private http: HttpClient,
@@ -24,54 +25,47 @@ export class AuthService {
     return this.state$.asObservable();
   }
 
+  /** То, что дергается из APP_INITIALIZER */
   initAuthCheck(): Observable<AuthState> {
-    this.state$.next({ status: 'loading' });
-
-    return this.http.get<MeResponse>(this.ME_URL, { withCredentials: true }).pipe(
-      switchMap((me) => {
-        this.state$.next({ status: 'authorized', me });
-
-        return this.modelTokens.fetchTokens().pipe(
-          map(() => this.state$.value),
-          catchError((err) => {
-            console.error('Не удалось получить токены модели', err);
-            this.state$.next({
-              status: 'error',
-              message: 'Вы авторизованы, но не удалось получить токен модели.',
-            });
-            return of(this.state$.value);
-          }),
-        );
-      }),
-      catchError((err) => {
-        if (err?.status === 403) {
-          this.modelTokens.clear();
-          this.state$.next({ status: 'unauthorized' });
-          return of(this.state$.value);
-        }
-
-        console.error('Ошибка проверки авторизации', err);
-        this.modelTokens.clear();
-        this.state$.next({
-          status: 'error',
-          message: 'Вы не авторизованы',
-        });
-        return of(this.state$.value);
+    return this.refreshMe().pipe(
+      map((me) => ({ status: 'authorized', me }) as AuthState),
+      catchError(() => {
+        // если не авторизован — просто ставим unauthorized, без ошибок наружу
+        this.setUnauthorized();
+        return of<AuthState>({ status: 'unauthorized' });
       }),
     );
   }
 
+  /** Обновить сессию / токены через /api/me (single-flight) */
+  refreshMe(): Observable<MeResponse> {
+    if (!this.refreshInFlight$) {
+      this.refreshInFlight$ = this.http
+        .get<MeResponse>(this.ME_URL, { withCredentials: true })
+        .pipe(
+          tap((me) => {
+            this.state$.next({ status: 'authorized', me });
+            this.modelTokens.setFromMe(me); // берет me.model_tokens.access_token
+          }),
+          shareReplay({ bufferSize: 1, refCount: false }),
+          finalize(() => {
+            this.refreshInFlight$ = undefined;
+          }),
+        );
+    }
+    return this.refreshInFlight$;
+  }
+
+  setUnauthorized(): void {
+    this.modelTokens.clear();
+    this.state$.next({ status: 'unauthorized' });
+  }
+
   login(): void {
-    window.location.href = this.LOGIN_URL;
+    window.location.href = `${this.API_BASE}/auth/login`;
   }
 
   changeAccount(): void {
-    this.modelTokens.clear();
-    window.location.href = this.LOGOUT_URL;
-  }
-
-  getMeSnapshot(): MeResponse | null {
-    const s = this.state$.value;
-    return s.status === 'authorized' ? s.me : null;
+    window.location.href = `${this.API_BASE}/auth/login?force=true`;
   }
 }

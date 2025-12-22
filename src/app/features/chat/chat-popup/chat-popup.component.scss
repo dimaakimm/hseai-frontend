@@ -255,9 +255,18 @@
   padding: 6px 9px;
   border-radius: 10px;
   font-size: 13px;
-  line-height: 1.4;
   word-wrap: break-word;
   white-space: pre-line;
+  p{
+    all: unset;
+    margin: 0;
+    padding: 6px 9px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    white-space: pre-line;
+  }
 }
 
 .chat-message--bot .chat-message__bubble {
@@ -562,3 +571,12 @@
 .chat-message__avatar--spacer {
   visibility: hidden;
 }
+
+:host ::ng-deep .chat-message__bubble p {
+  margin: 0 !important;
+  unicode-bidi: unset;
+  margin-inline-end: 0;
+  margin-block-end: 0;
+
+}
+

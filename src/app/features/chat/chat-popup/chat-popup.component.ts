@@ -12,6 +12,8 @@ import { FormsModule } from '@angular/forms';
 import { Campus, EducationLevel, UserProfile } from '../../../models/user-profile.model';
 import { AiApiService } from '../../../services/ai-api.service';
 const USER_PROFILE_STORAGE_KEY = 'hseChatUserProfile';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 type ChatStage =
   | 'askQuestion'
@@ -153,6 +155,8 @@ export class ChatPopupComponent implements OnInit {
   }
 
   close(): void {
+    this.isWaitingForModel = false;
+    this.stage = 'askQuestion';
     this.isOpen = false;
   }
 
@@ -181,7 +185,7 @@ export class ChatPopupComponent implements OnInit {
     this.messages.push({
       id: this.msgId++,
       role: 'bot',
-      text,
+      text: this.renderMarkdown(text),
       timestamp: this.nowTime(),
     });
 
@@ -192,7 +196,7 @@ export class ChatPopupComponent implements OnInit {
     this.messages.push({
       id: this.msgId++,
       role: 'user',
-      text,
+      text: this.renderMarkdown(text),
       timestamp: this.nowTime(),
     });
 
@@ -284,10 +288,27 @@ export class ChatPopupComponent implements OnInit {
           );
         }
       },
-      error: () => {
+      error: (err) => {
+        if (err?.code === 'UNAUTHORIZED') {
+          this.close(); // закрываем попап
+          return; // ничего в чат не пишем
+        }
         this.showErrorWithRating();
       },
     });
+  }
+
+  private renderMarkdown(text: string): string {
+    const raw = text ?? '';
+
+    // marked делает HTML
+    const html = marked.parse(raw, {
+      breaks: true, // переносы строк как <br>
+      gfm: true,
+    }) as string;
+
+    // чистим от XSS
+    return DOMPurify.sanitize(html);
   }
 
   /** Пользователь вручную выбрал категорию, когда confidence = 0 */
@@ -490,7 +511,11 @@ export class ChatPopupComponent implements OnInit {
           this.addBotMessage('Удовлетворен(а) ли ты полученным ответом?');
           this.stage = 'rateAnswer';
         },
-        error: () => {
+        error: (err) => {
+          if (err?.code === 'UNAUTHORIZED') {
+            this.close(); // закрываем попап
+            return; // ничего в чат не пишем
+          }
           this.showErrorWithRating();
         },
       });

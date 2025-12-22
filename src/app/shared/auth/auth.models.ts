@@ -16,6 +16,7 @@ export interface MeResponse {
 
 export type AuthState =
   | { status: 'loading' }
+  | { status: 'checking' }
   | { status: 'unauthorized' }
   | { status: 'authorized'; me: MeResponse }
   | { status: 'error'; message: string };

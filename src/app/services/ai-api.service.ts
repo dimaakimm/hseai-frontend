@@ -1,61 +1,11 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, catchError, map, of, switchMap } from 'rxjs';
+import { Observable, defer, throwError, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
+
+import { AuthService } from '../shared/auth/auth.service';
 import { UserProfile } from '../models/user-profile.model';
 import { ModelTokensService } from '../shared/auth/model-tokens.service';
-
-interface ClassifierOutput {
-  name: string;
-  datatype: string;
-  data: string | null;
-  shape?: any;
-  content_type?: any;
-}
-
-interface ClassifierRawResponse {
-  outputs: ClassifierOutput[];
-}
-
-export interface ClassifierResult {
-  question: string | null;
-  predicted_category: string | null;
-  confidence: number | null;
-  is_inappropriate: boolean | null;
-  top_categories: Array<{ category: string; confidence: number }> | null;
-}
-
-function parseBoolStr(v: string | null): boolean | null {
-  if (v === null) return null;
-  const s = v.trim().toLowerCase();
-  if (s === 'true') return true;
-  if (s === 'false') return false;
-  return null;
-}
-
-function parseJsonSafe<T>(v: string | null): T | null {
-  if (!v) return null;
-  try {
-    return JSON.parse(v) as T;
-  } catch {
-    return null;
-  }
-}
-
-function parseClassifierResponse(resp: ClassifierRawResponse): ClassifierResult {
-  const get = (name: string): string | null =>
-    resp.outputs?.find((o) => o.name === name)?.data ?? null;
-
-  const confidenceStr = get('confidence');
-  const topStr = get('top_categories');
-
-  return {
-    question: get('question'),
-    predicted_category: get('predicted_category'),
-    confidence: confidenceStr ? Number(confidenceStr) : null,
-    is_inappropriate: parseBoolStr(get('is_inappropriate')),
-    top_categories: parseJsonSafe<Array<{ category: string; confidence: number }>>(topStr),
-  };
-}
 
 export interface PredictResult {
   answer: string | null;
@@ -68,79 +18,128 @@ interface RagOutput {
   data: string | null;
   shape?: number | number[];
 }
-
 interface RagRawResponse {
   outputs: RagOutput[];
 }
 
 @Injectable({ providedIn: 'root' })
 export class AiApiService {
-  private readonly CLASSIFIER_URL =
-    'https://platform.stratpro.hse.ru/pu-sp4-pa-newcls/deploy_version/predict';
+  private readonly CLASSIFIER_URL = 'https://194.169.160.2:8443/predict';
   private readonly RAG_URL =
-    'https://platform.stratpro.hse.ru/pu-sp4-pa-hse-model/deploy_version/predict';
+    'https://platform.stratpro.hse.ru/pu-vleviczkaya-pa-hsetest/hsetest/predict';
 
   constructor(
     private http: HttpClient,
+    private auth: AuthService,
     private modelTokens: ModelTokensService,
   ) {}
 
-  private buildHeaders(token: string): HttpHeaders | null {
-    const safe = (token ?? '').trim();
-    if (!safe) return null;
-
-    return new HttpHeaders({
-      Authorization: `Bearer ${safe}`,
-      'Content-Type': 'application/json',
-    });
+  private isAuthLikeError(err: any): boolean {
+    const s = err?.status;
+    return s === 401 || s === 403;
   }
 
-  classify(question: string): Observable<ClassifierResult | null> {
-    const echo_request = {
-      inputs: [
-        {
-          name: 'question',
-          data: question,
-          datatype: 'str',
-          shape: question.length,
-        },
-      ],
-      output_fields: [
-        { name: 'question', datatype: 'str' },
-        { name: 'predicted_category', datatype: 'str' },
-        { name: 'confidence', datatype: 'str' },
-        { name: 'is_inappropriate', datatype: 'str' },
-        { name: 'top_categories', datatype: 'str' },
-      ],
-    };
-
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const safe = (token ?? '').trim();
-        if (!safe) return of(null);
-
-        const headers = new HttpHeaders({
-          Authorization: `Bearer ${safe}`,
-          'Content-Type': 'application/json',
-        });
-
-        return this.http
-          .post<ClassifierRawResponse>(this.CLASSIFIER_URL, echo_request, { headers })
-          .pipe(
-            map((resp) => parseClassifierResponse(resp)),
-            catchError((err) => {
-              console.error('Ошибка classifier', err);
-              return of(null);
-            }),
-          );
-      }),
+  /** универсальная обёртка: если токен протух — refresh /me, потом retry один раз */
+  private withMeRefreshRetry<T>(requestFactory: () => Observable<T>): Observable<T> {
+    return defer(() => requestFactory()).pipe(
       catchError((err) => {
-        console.error('Classifier token error', err);
-        return of(null);
+        if (!this.isAuthLikeError(err)) {
+          return throwError(() => err);
+        }
+
+        // 1) пробуем обновить сессию через /me (бэк там обновит model_tokens)
+        return this.auth.refreshMe().pipe(
+          // 2) если /me ок — повторяем исходный запрос
+          switchMap(() => defer(() => requestFactory())),
+          catchError((meErr) => {
+            // если /me тоже 401/403 — значит реально не авторизован
+            if (this.isAuthLikeError(meErr)) {
+              this.auth.setUnauthorized();
+              return throwError(() => ({ code: 'UNAUTHORIZED' as const }));
+            }
+            return throwError(() => meErr);
+          }),
+        );
       }),
     );
   }
 
+  /** classifier в формате echo_request (как ты требовал) + Authorization: Bearer <model_access_token> */
+  classify(question: string): Observable<any> {
+    return this.withMeRefreshRetry(() =>
+      this.modelTokens.getAccessToken().pipe(
+        switchMap((token) => {
+          const headers = new HttpHeaders({
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          });
+
+          const body = {
+            inputs: [
+              {
+                name: 'question',
+                data: question,
+                datatype: 'str',
+                shape: question.length,
+              },
+            ],
+            output_fields: [
+              { name: 'question', datatype: 'str' },
+              { name: 'predicted_category', datatype: 'str' },
+              { name: 'confidence', datatype: 'str' },
+              { name: 'is_inappropriate', datatype: 'str' },
+              { name: 'top_categories', datatype: 'str' },
+            ],
+          };
+
+          return this.http.post<any>(this.CLASSIFIER_URL, body, { headers });
+        }),
+      ),
+    );
+  }
+
+  askWithClassification(params: {
+    question: string;
+    userProfile: UserProfile;
+    chatHistory: any[];
+  }): Observable<PredictResult> {
+    const { question, userProfile, chatHistory } = params;
+
+    return this.classify(question).pipe(
+      // если classify вернул RagRawResponse(outputs) — преобразуем в {predicted_category, confidence, ...}
+      map((res: any) => {
+        // если у тебя classify уже отдаёт "плоский" объект — просто верни res
+        if (!res?.outputs) return res;
+
+        const get = (name: string) => res.outputs.find((o: any) => o?.name === name)?.data;
+
+        const predicted_category = get('predicted_category');
+        const confidenceRaw = get('confidence');
+
+        return {
+          predicted_category,
+          confidence: confidenceRaw != null ? Number(confidenceRaw) : 0,
+          is_inappropriate: get('is_inappropriate') === 'true',
+          top_categories: get('top_categories'),
+        };
+      }),
+      catchError((err) => {
+        // если classifier упал — идём дальше с пустыми фильтрами
+        console.error('Ошибка classifier', err);
+        return of({});
+      }),
+      switchMap((questionFilters) =>
+        this.predict({
+          question,
+          questionFilters,
+          userProfile,
+          chatHistory,
+        }),
+      ),
+    );
+  }
+
+  /** RAG predict: авторизация Bearer тем же model access token */
   predict(params: {
     question: string;
     questionFilters: any;
@@ -149,7 +148,10 @@ export class AiApiService {
   }): Observable<PredictResult> {
     const { question, questionFilters, userProfile } = params;
 
-    const questionFiltersToSend = questionFilters?.predicted_category ?? {};
+    const questionFiltersToSend =
+      questionFilters === null || questionFilters === undefined
+        ? {}
+        : questionFilters.predicted_category;
 
     const payload = {
       inputs: [
@@ -180,67 +182,26 @@ export class AiApiService {
       ],
     };
 
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const headers = this.buildHeaders(token);
-        if (!headers) {
-          return of<PredictResult>({
-            answer: 'Не удалось получить токен модели. Перезайдите.',
-            sources: 'auth',
+    return this.withMeRefreshRetry(() =>
+      this.modelTokens.getAccessToken().pipe(
+        switchMap((token) => {
+          const headers = new HttpHeaders({
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
           });
-        }
 
-        return this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }).pipe(
-          map((response) => {
-            const answerOutput = response.outputs.find((o) => o.name === 'answer');
-            const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
+          return this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers });
+        }),
+        map((response) => {
+          const answerOutput = response.outputs.find((o) => o.name === 'answer');
+          const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
 
-            return {
-              answer: (answerOutput?.data ?? null) as string | null,
-              sources: (sourcesOutput?.data ?? null) as string | null,
-            };
-          }),
-          catchError((err) => {
-            console.error('Ошибка RAG predict', err);
-            return of<PredictResult>({ answer: 'HTTP error / network error', sources: 'error' });
-          }),
-        );
-      }),
-      catchError((err) => {
-        console.error('RAG token error', err);
-        return of<PredictResult>({
-          answer: 'Вы не авторизованы или токен модели истёк. Перезайдите.',
-          sources: 'auth',
-        });
-      }),
-    );
-  }
-
-  askWithClassification(params: {
-    question: string;
-    userProfile: UserProfile;
-    chatHistory: any[];
-  }): Observable<PredictResult> {
-    const { question, userProfile, chatHistory } = params;
-
-    return this.classify(question).pipe(
-      switchMap((questionFilters) =>
-        this.predict({
-          question,
-          questionFilters,
-          userProfile,
-          chatHistory,
+          return {
+            answer: (answerOutput?.data ?? null) as string | null,
+            sources: (sourcesOutput?.data ?? null) as string | null,
+          };
         }),
       ),
-      catchError((err) => {
-        console.error('askWithClassification fallback', err);
-        return this.predict({
-          question,
-          questionFilters: {},
-          userProfile,
-          chatHistory,
-        });
-      }),
     );
   }
 }
