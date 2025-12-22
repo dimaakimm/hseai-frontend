@@ -10,19 +10,3 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
     }),
   );
 };
-
-export const unauthorizedReloadInterceptor: HttpInterceptorFn = (req, next) => {
-  return next(req).pipe(
-    catchError((err) => {
-      if (err instanceof HttpErrorResponse && err.status === 401) {
-        const isMeRequest = req.url.includes('/api/me') || req.url.endsWith('/api/me');
-
-        if (!isMeRequest) {
-          window.location.reload();
-        }
-      }
-
-      return throwError(() => err);
-    }),
-  );
-};

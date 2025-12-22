@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, catchError, map, of, switchMap } from 'rxjs';
+import { HttpClient, HttpHeaders, HttpErrorResponse } from '@angular/common/http';
+import { Observable, catchError, map, of, switchMap, throwError } from 'rxjs';
 import { UserProfile } from '../models/user-profile.model';
 import { ModelTokensService } from '../shared/auth/model-tokens.service';
 
@@ -14,7 +14,6 @@ interface RagOutput {
   datatype: string;
   data: string | null;
   shape?: number | number[];
-  content_type?: string | null;
 }
 
 interface RagRawResponse {
@@ -40,26 +39,68 @@ export class AiApiService {
     });
   }
 
-  private pickOutput(response: RagRawResponse, name: string): string | null {
-    const out = response?.outputs?.find((o) => o?.name === name);
-    return out?.data ?? null;
+  private isAuthError(err: unknown): boolean {
+    const e = err as HttpErrorResponse;
+    return !!e && (e.status === 401 || e.status === 403);
   }
 
-  /** ✅ classifier "как было": inputs/output_fields */
-  classify(question: string): Observable<{
-    question?: string;
-    predicted_category?: string;
-    confidence?: number;
-    is_inappropriate?: boolean;
-    top_categories?: any;
-  } | null> {
-    const echo_request = {
+  private reload(): never {
+    // можно предварительно чистить токены, чтобы после reload не было мусора
+    this.modelTokens.clear();
+    window.location.reload();
+    // TS: never
+    throw new Error('reloading');
+  }
+
+  /**
+   * Выполняет запрос с access token.
+   * Если запрос упал 401/403 — обновляет токен через /get_model_tokens и повторяет запрос 1 раз.
+   * Если refresh или повтор тоже падают — reload страницы.
+   */
+  private withTokenRetryOnAuthError<T>(
+    makeRequest: (headers: HttpHeaders) => Observable<T>,
+  ): Observable<T> {
+    return this.modelTokens.getAccessToken().pipe(
+      switchMap((token) => {
+        const safe = (token ?? '').trim();
+        if (!safe) {
+          // нет токена — пробуем обновить
+          return this.modelTokens.refreshTokens().pipe(
+            switchMap((t) => makeRequest(this.buildHeaders(t.access_token))),
+            catchError(() => this.reload()),
+          );
+        }
+
+        return makeRequest(this.buildHeaders(safe)).pipe(
+          catchError((err) => {
+            if (!this.isAuthError(err)) return throwError(() => err);
+
+            // 401/403 → обновляем токены и повторяем запрос
+            return this.modelTokens.refreshTokens().pipe(
+              switchMap((t) => makeRequest(this.buildHeaders(t.access_token))),
+              catchError(() => this.reload()),
+            );
+          }),
+        );
+      }),
+      catchError((err) => {
+        // если даже получение access token упало — reload
+        if (this.isAuthError(err)) return this.reload();
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  // ====== CLASSIFIER ======
+
+  classify(question: string): Observable<any | null> {
+    // твой нужный echo_request
+    const payload = {
       inputs: [
         {
           name: 'question',
           data: question,
           datatype: 'str',
-          // shape как было у тебя: len(question). В JS это question.length
           shape: question.length,
         },
       ],
@@ -72,48 +113,18 @@ export class AiApiService {
       ],
     };
 
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const safe = (token ?? '').trim();
-        if (!safe) {
-          console.error('Classifier: пустой access_token');
-          return of(null);
-        }
-
-        return this.http
-          .post<RagRawResponse>(this.CLASSIFIER_URL, echo_request, {
-            headers: this.buildHeaders(safe),
-          })
-          .pipe(
-            map((resp) => {
-              const predicted_category = this.pickOutput(resp, 'predicted_category');
-              const confidenceStr = this.pickOutput(resp, 'confidence');
-              const is_inappropriateStr = this.pickOutput(resp, 'is_inappropriate');
-              const top_categoriesStr = this.pickOutput(resp, 'top_categories');
-
-              return {
-                question: this.pickOutput(resp, 'question') ?? question,
-                predicted_category: predicted_category ?? undefined,
-                confidence: confidenceStr != null ? Number(confidenceStr) : 0,
-                is_inappropriate: is_inappropriateStr === 'true',
-                top_categories:
-                  top_categoriesStr != null ? this.safeJsonParse(top_categoriesStr) : undefined,
-              };
-            }),
-            catchError((err) => {
-              console.error('Ошибка classifier', err);
-              return of(null);
-            }),
-          );
-      }),
+    return this.withTokenRetryOnAuthError((headers) =>
+      this.http.post<any>(this.CLASSIFIER_URL, payload, { headers }),
+    ).pipe(
       catchError((err) => {
-        console.error('Classifier token error', err);
+        console.error('Ошибка classifier', err);
         return of(null);
       }),
     );
   }
 
-  /** ✅ RAG predict (у тебя уже был "как было", оставил) */
+  // ====== RAG / MODEL ======
+
   predict(params: {
     question: string;
     questionFilters: any;
@@ -156,41 +167,23 @@ export class AiApiService {
       ],
     };
 
-    return this.modelTokens.getAccessToken().pipe(
-      switchMap((token) => {
-        const safe = (token ?? '').trim();
-        if (!safe) {
-          return of<PredictResult>({
-            answer: 'Не удалось получить токен модели. Перезайдите.',
-            sources: 'auth',
-          });
-        }
+    return this.withTokenRetryOnAuthError((headers) =>
+      this.http.post<RagRawResponse>(this.RAG_URL, payload, { headers }),
+    ).pipe(
+      map((response) => {
+        const answerOutput = response.outputs.find((o) => o.name === 'answer');
+        const sourcesOutput = response.outputs.find((o) => o.name === 'sources');
 
-        return this.http
-          .post<RagRawResponse>(this.RAG_URL, payload, {
-            headers: this.buildHeaders(safe),
-          })
-          .pipe(
-            map((response) => {
-              return {
-                answer: this.pickOutput(response, 'answer'),
-                sources: this.pickOutput(response, 'sources'),
-              };
-            }),
-            catchError((err) => {
-              console.error('Ошибка RAG predict', err);
-              return of<PredictResult>({
-                answer: 'HTTP error / network error',
-                sources: 'error',
-              });
-            }),
-          );
+        return {
+          answer: (answerOutput?.data ?? null) as string | null,
+          sources: (sourcesOutput?.data ?? null) as string | null,
+        };
       }),
       catchError((err) => {
-        console.error('RAG token error', err);
+        console.error('Ошибка RAG predict', err);
         return of<PredictResult>({
-          answer: 'Вы не авторизованы или токен модели истёк. Перезайдите.',
-          sources: 'auth',
+          answer: 'HTTP error / network error',
+          sources: 'error',
         });
       }),
     );
@@ -222,13 +215,5 @@ export class AiApiService {
         });
       }),
     );
-  }
-
-  private safeJsonParse(value: string): any {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
   }
 }

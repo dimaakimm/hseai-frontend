@@ -8,10 +8,7 @@ import { AiService } from './app/core/services/ai.service';
 import { MockClassifierService } from './app/core/services/mock/mock-classifier.service';
 import { MockAiService } from './app/core/services/mock/mock-ai.service';
 import { authInterceptor } from './app/core/interceptors/auth.interceptor';
-import {
-  errorInterceptor,
-  unauthorizedReloadInterceptor,
-} from './app/core/interceptors/error.interceptor';
+import { errorInterceptor } from './app/core/interceptors/error.interceptor';
 import { timeoutInterceptor } from './app/core/interceptors/timeout.interceptor';
 import { API_CONFIG } from './app/core/tokens/api-config.token';
 import { retryInterceptor } from './app/core/interceptors/retry.interceptor';
@@ -26,13 +23,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideRouter(routes),
     provideHttpClient(
-      withInterceptors([
-        authInterceptor,
-        timeoutInterceptor,
-        retryInterceptor,
-        errorInterceptor,
-        unauthorizedReloadInterceptor,
-      ]),
+      withInterceptors([authInterceptor, timeoutInterceptor, retryInterceptor, errorInterceptor]),
     ),
     {
       provide: API_CONFIG,
