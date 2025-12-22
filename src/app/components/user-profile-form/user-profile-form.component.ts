@@ -1,68 +1,52 @@
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Campus, EducationLevel, UserProfile } from '../../models/user-profile.model';
-import { UserProfileService } from '../../services/user-profile.service';
+import { FormsModule } from '@angular/forms';
+
+export type Campus = 'Москва' | 'Санкт-Петербург' | 'Нижний Новгород' | 'Пермь';
+export type EducationLevel = 'бакалавриат' | 'специалитет' | 'магистратура' | 'аспирантура';
+
+export interface UserProfile {
+  name: string;
+  campus: Campus;
+  level: EducationLevel;
+}
 
 @Component({
   selector: 'app-user-profile-form',
   standalone: true,
+  imports: [CommonModule, FormsModule],
   templateUrl: './user-profile-form.component.html',
-  // styleUrls: ['./user-profile-form.component.scss'],
-  imports: [CommonModule, ReactiveFormsModule], // <<< ВАЖНО
 })
 export class UserProfileFormComponent implements OnInit {
-  @Output() saved = new EventEmitter<UserProfile>();
+  @Input() initialName = ''; // сюда отдаём formatName(s)
+  @Input() initialProfile?: Partial<UserProfile>;
 
-  form: FormGroup;
+  @Output() userProfileChange = new EventEmitter<UserProfile>();
 
   readonly campuses: Campus[] = ['Москва', 'Санкт-Петербург', 'Нижний Новгород', 'Пермь'];
-
   readonly levels: EducationLevel[] = ['бакалавриат', 'специалитет', 'магистратура', 'аспирантура'];
 
-  submitError: string | null = null;
-
-  constructor(
-    private fb: FormBuilder,
-    private userProfileService: UserProfileService,
-  ) {
-    this.form = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(3)]],
-      campus: ['Москва', Validators.required],
-      level: ['', Validators.required],
-    });
-  }
+  userProfileDraft: UserProfile = {
+    name: '',
+    campus: 'Москва',
+    level: 'бакалавриат',
+  };
 
   ngOnInit(): void {
-    const existing = this.userProfileService.getProfile();
-    if (existing) {
-      this.form.patchValue(existing);
-    }
+    this.userProfileDraft = {
+      name: (this.initialName || '').trim(),
+      campus: (this.initialProfile?.campus as Campus) ?? 'Москва',
+      level: (this.initialProfile?.level as EducationLevel) ?? 'бакалавриат',
+    };
+
+    this.emit();
   }
 
-  get nameControl() {
-    return this.form.get('name');
+  onChange(): void {
+    this.emit();
   }
 
-  get campusControl() {
-    return this.form.get('campus');
-  }
-
-  get levelControl() {
-    return this.form.get('level');
-  }
-
-  onSubmit(): void {
-    this.submitError = null;
-
-    if (this.form.invalid) {
-      this.form.markAllAsTouched();
-      this.submitError = 'Пожалуйста, исправьте ошибки в форме.';
-      return;
-    }
-
-    const profile: UserProfile = this.form.value;
-    this.userProfileService.setProfile(profile);
-    this.saved.emit(profile);
+  private emit(): void {
+    this.userProfileChange.emit({ ...this.userProfileDraft });
   }
 }

@@ -20,14 +20,12 @@ import { ChatPopupComponent } from './features/chat/chat-popup/chat-popup.compon
 export class AppComponent {
   state$: Observable<AuthState>;
 
-  // ✅ добавляем то, что ожидает шаблон
   userProfile: UserProfile = {
-    // заполни дефолтами под твою модель, ниже пример
-    level: 'student',
-    campus: 'main',
+    level: 'бакалавриат',
+    campus: 'Москва',
   } as unknown as UserProfile;
 
-  feedbackUrl = 'https://your-feedback-url.example.com'; // либо что у тебя было
+  feedbackUrl = 'https://forms.yandex.ru/cloud/688626ebeb614611471b4c22';
 
   constructor(private auth: AuthService) {
     this.state$ = this.auth.authState$();
