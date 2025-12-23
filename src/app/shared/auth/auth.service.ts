@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, map, of, tap } from 'rxjs';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { BehaviorSubject, Observable, catchError, map, of, switchMap, tap } from 'rxjs';
 
 import { AuthState, MeResponse } from './auth.models';
 import { ModelTokensService } from './model-tokens.service';
@@ -24,49 +24,56 @@ export class AuthService {
     return this.state$.asObservable();
   }
 
-  /**
-   * Логика как "было":
-   * - дергаем /api/me с куками
-   * - если ок -> статус authorized
-   * - сохраняем model_tokens из /api/me в ModelTokensService (если пришли)
-   * - НЕ дергаем отдельно get_model_tokens тут (его дергаем только при 401/403 на модели)
-   */
   initAuthCheck(): Observable<AuthState> {
     this.state$.next({ status: 'loading' });
 
-    return this.http.get<MeResponse>(this.ME_URL, { withCredentials: true }).pipe(
-      tap((me) => {
-        this.state$.next({ status: 'authorized', me });
+    const sidFromUrl = this.getSidFromUrl();
 
-        // /api/me уже возвращает model_tokens — кладём их в кэш, если есть
-        const token = (me as any)?.model_tokens?.access_token;
-        if (typeof token === 'string' && token.trim()) {
-          // refreshTokens() НЕ нужен — мы просто кладём то, что пришло
-          // В ModelTokensService у нас tokens$ приватный, поэтому делаем мягко:
-          // вызываем refreshTokens только если ты хочешь строго через /get_model_tokens.
-          // Но чтобы не дёргать сеть — лучше добавить метод setTokens в сервис.
-        }
-      }),
-      // если хочешь прямо сейчас сохранить model_tokens без сетевого запроса —
-      // добавь метод setTokens() в ModelTokensService (ниже дам)
-      map(() => this.state$.value),
-      catchError((err) => {
-        // у тебя на бэке 401, а не 403 — учитываем оба
-        if (err?.status === 401 || err?.status === 403) {
-          this.modelTokens.clear();
-          this.state$.next({ status: 'unauthorized' });
+    const params = sidFromUrl ? new HttpParams().set('sid', sidFromUrl) : undefined;
+
+    return this.http
+      .get<MeResponse>(this.ME_URL, {
+        withCredentials: true,
+        params,
+      })
+      .pipe(
+        tap(() => {
+          // ✅ Если авторизация прошла через sid в URL — убираем его из адресной строки
+          if (sidFromUrl) this.removeSidFromUrl();
+        }),
+        switchMap((me) => {
+          this.state$.next({ status: 'authorized', me });
+
+          // Если у тебя modelTokensService по-другому называется/работает — оставь как у тебя в проекте
+          return this.modelTokens.getAccessToken().pipe(
+            map(() => this.state$.value),
+            catchError((err) => {
+              console.error('Не удалось получить токен модели', err);
+              this.state$.next({
+                status: 'error',
+                message: 'Вы авторизованы, но не удалось получить токен модели.',
+              });
+              return of(this.state$.value);
+            }),
+          );
+        }),
+        catchError((err) => {
+          // 401/403 — считаем неавторизован
+          if (err?.status === 401 || err?.status === 403) {
+            this.modelTokens.clear?.();
+            this.state$.next({ status: 'unauthorized' });
+            return of(this.state$.value);
+          }
+
+          console.error('Ошибка проверки авторизации', err);
+          this.modelTokens.clear?.();
+          this.state$.next({
+            status: 'error',
+            message: 'Не удалось проверить авторизацию',
+          });
           return of(this.state$.value);
-        }
-
-        console.error('Ошибка проверки авторизации', err);
-        this.modelTokens.clear();
-        this.state$.next({
-          status: 'error',
-          message: 'Не удалось проверить авторизацию',
-        });
-        return of(this.state$.value);
-      }),
-    );
+        }),
+      );
   }
 
   login(): void {
@@ -74,12 +81,32 @@ export class AuthService {
   }
 
   changeAccount(): void {
-    this.modelTokens.clear();
+    this.modelTokens.clear?.();
     window.location.href = this.LOGOUT_URL;
   }
 
   getMeSnapshot(): MeResponse | null {
     const s = this.state$.value;
     return s.status === 'authorized' ? s.me : null;
+  }
+
+  // ---------------- helpers ----------------
+
+  private getSidFromUrl(): string | null {
+    if (typeof window === 'undefined') return null;
+    const sp = new URLSearchParams(window.location.search);
+    const sid = sp.get('sid');
+    const safe = (sid ?? '').trim();
+    return safe ? safe : null;
+  }
+
+  private removeSidFromUrl(): void {
+    if (typeof window === 'undefined') return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('sid');
+
+    // убираем sid без перезагрузки
+    window.history.replaceState({}, document.title, url.toString());
   }
 }
