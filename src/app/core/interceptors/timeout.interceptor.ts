@@ -4,6 +4,5 @@ import { API_CONFIG } from '../tokens/api-config.token';
 import { timeout } from 'rxjs/operators';
 
 export const timeoutInterceptor: HttpInterceptorFn = (req, next) => {
-  const cfg = inject(API_CONFIG);
-  return next(req).pipe(timeout(cfg.timeoutMs));
+  return next(req).pipe(timeout(120_000)); // 2 минуты
 };
